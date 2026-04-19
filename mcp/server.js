@@ -176,6 +176,10 @@ export function handleGetSymbols(projectDir, _args) {
     while ((m = re.exec(content)) !== null) {
       symbols.push({ name: m[1], kind: "Sub", module });
     }
+    const fnRe = /\bFunction\s+(\w+)\s*\(/g;
+    while ((m = fnRe.exec(content)) !== null) {
+      symbols.push({ name: m[1], kind: "Function", module });
+    }
   }
   return {
     content: [{ type: "text", text: JSON.stringify(symbols, null, 2) }],
