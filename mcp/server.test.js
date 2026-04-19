@@ -78,6 +78,42 @@ describe("handleGetSymbols", () => {
     );
   });
 
+  it("resolves .cls module name from Attribute VB_Name, ignoring preamble", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source =
+      "VERSION 1.0 CLASS\n" +
+      "BEGIN\n" +
+      "  MultiUse = -1  'True\n" +
+      "END\n" +
+      'Attribute VB_Name = "CustomerRepo"\n' +
+      "Attribute VB_GlobalNameSpace = False\n" +
+      "Attribute VB_Creatable = False\n" +
+      "Attribute VB_PredeclaredId = False\n" +
+      "Attribute VB_Exposed = False\n" +
+      "Option Explicit\n" +
+      "\n" +
+      "Sub Greet()\n" +
+      "End Sub\n";
+    writeFileSync(join(tmpDir, "Whatever.cls"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toHaveLength(1);
+    expect(symbols[0]).toEqual(
+      expect.objectContaining({
+        name: "Greet",
+        kind: "Sub",
+        module: "CustomerRepo",
+      })
+    );
+    // Regression guard: preamble keys must not leak as symbols.
+    expect(symbols.find((s) => s.name === "MultiUse")).toBeUndefined();
+    expect(symbols.find((s) => s.name === "VB_Name")).toBeUndefined();
+  });
+
   it("returns Property Get/Let/Set procedures as symbols", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
     const source =
