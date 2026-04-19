@@ -1,0 +1,17 @@
+{
+  "name": "@verde-vba/mcp",
+  "version": "0.1.0",
+  "description": "Verde MCP server for AI-native VBA development",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "verde-mcp": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "license": "MIT"
+}
