@@ -1,0 +1,5 @@
+[tools]
+rust = "1.95"
+node = "22"
+bun = "latest"
+just = "latest"
