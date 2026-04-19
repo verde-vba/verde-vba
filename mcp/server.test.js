@@ -114,6 +114,57 @@ describe("handleGetSymbols", () => {
     expect(symbols.find((s) => s.name === "VB_Name")).toBeUndefined();
   });
 
+  it("detects module-level Public/Private/Dim variables with type info", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source =
+      "Option Explicit\n" +
+      "\n" +
+      "Public gCustomerName As String\n" +
+      "Private mCounter As Long\n" +
+      "Dim unscoped As Variant\n" +
+      "\n" +
+      "Sub DoWork()\n" +
+      "    Dim localOnly As Integer\n" +
+      "    localOnly = 42\n" +
+      "End Sub\n";
+    writeFileSync(join(tmpDir, "Vars.bas"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "gCustomerName",
+          kind: "Variable",
+          module: "Vars",
+          type: "String",
+        }),
+        expect.objectContaining({
+          name: "mCounter",
+          kind: "Variable",
+          module: "Vars",
+          type: "Long",
+        }),
+        expect.objectContaining({
+          name: "unscoped",
+          kind: "Variable",
+          module: "Vars",
+          type: "Variant",
+        }),
+        expect.objectContaining({
+          name: "DoWork",
+          kind: "Sub",
+          module: "Vars",
+        }),
+      ])
+    );
+    // localOnly is declared INSIDE DoWork — must not leak as a module symbol.
+    expect(symbols.find((s) => s.name === "localOnly")).toBeUndefined();
+  });
+
   it("returns Property Get/Let/Set procedures as symbols", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
     const source =
