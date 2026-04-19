@@ -1,0 +1,40 @@
+[package]
+name = "verde"
+version = "0.1.0"
+description = "AI-native VBA development environment"
+authors = ["verde-vba"]
+license = "MIT"
+repository = "https://github.com/verde-vba/verde"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "verde_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+sha2 = "0.10"
+tauri = { version = "2" }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+whoami = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+] }
