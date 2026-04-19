@@ -203,60 +203,81 @@ const CONST_LINE =
 const TYPE_OPEN = /^\s*(?:Public|Private)?\s*Type\s+(\w+)\b/i;
 const TYPE_CLOSE = /^\s*End\s+Type\b/i;
 
+// Procedures (Sub/Function/Property) are matched globally across the source
+// because their declaration lines are self-anchoring.
+function collectProcedureSymbols(source, module) {
+  const symbols = [];
+  for (const [regex, toSymbol] of SYMBOL_PATTERNS) {
+    regex.lastIndex = 0;
+    let m;
+    while ((m = regex.exec(source)) !== null) {
+      symbols.push({ ...toSymbol(m), module });
+    }
+  }
+  return symbols;
+}
+
+// Variables/constants/user types live only at module scope. We walk the
+// source line-by-line, tracking whether we're inside a procedure or Type
+// block, and only emit a symbol when at module scope.
+function collectModuleLevelSymbols(source, module) {
+  const symbols = [];
+  let inProcedure = 0;
+  let inTypeBlock = false;
+  for (const line of source.split("\n")) {
+    const atModuleScope = inProcedure === 0 && !inTypeBlock;
+    if (atModuleScope) {
+      const t = line.match(TYPE_OPEN);
+      if (t) {
+        symbols.push({ name: t[1], kind: "Type", module });
+        inTypeBlock = true;
+        continue;
+      }
+      const c = line.match(CONST_LINE);
+      if (c) {
+        const sym = { name: c[1], kind: "Constant", module };
+        if (c[2]) sym.type = c[2];
+        symbols.push(sym);
+      } else {
+        const v = line.match(VAR_LINE);
+        if (v) {
+          symbols.push({
+            name: v[1],
+            kind: "Variable",
+            module,
+            type: v[2] || "Variant",
+          });
+        }
+      }
+    }
+    if (inTypeBlock) {
+      if (TYPE_CLOSE.test(line)) inTypeBlock = false;
+    } else if (PROC_OPEN.test(line)) {
+      inProcedure++;
+    } else if (PROC_CLOSE.test(line) && inProcedure > 0) {
+      inProcedure--;
+    }
+  }
+  return symbols;
+}
+
+// Pure: parse all recognized symbols from a single module's source.
+// Extracted so the logic is independently unit-testable and the handler
+// stays an I/O shell.
+export function parseSymbols(source, module) {
+  return [
+    ...collectProcedureSymbols(source, module),
+    ...collectModuleLevelSymbols(source, module),
+  ];
+}
+
 export function handleGetSymbols(projectDir, _args) {
   const files = listModuleFiles(projectDir);
   const symbols = [];
   for (const file of files) {
     const content = readFileSync(join(projectDir, file), "utf-8");
     const module = moduleNameFor(file, content);
-    // Block patterns (Sub/Function/Property) scan whole file, since they're
-    // already anchored on their own declaration line.
-    for (const [regex, toSymbol] of SYMBOL_PATTERNS) {
-      regex.lastIndex = 0;
-      let m;
-      while ((m = regex.exec(content)) !== null) {
-        symbols.push({ ...toSymbol(m), module });
-      }
-    }
-    // Line patterns (Dim/Public/Private/Const/Type) need scope gating so
-    // locals inside a procedure and fields inside a Type block don't leak
-    // as module-level symbols.
-    let inProcedure = 0;
-    let inTypeBlock = false;
-    for (const line of content.split("\n")) {
-      const atModuleScope = inProcedure === 0 && !inTypeBlock;
-      if (atModuleScope) {
-        const t = line.match(TYPE_OPEN);
-        if (t) {
-          symbols.push({ name: t[1], kind: "Type", module });
-          inTypeBlock = true;
-          continue;
-        }
-        const c = line.match(CONST_LINE);
-        if (c) {
-          const sym = { name: c[1], kind: "Constant", module };
-          if (c[2]) sym.type = c[2];
-          symbols.push(sym);
-        } else {
-          const v = line.match(VAR_LINE);
-          if (v) {
-            symbols.push({
-              name: v[1],
-              kind: "Variable",
-              module,
-              type: v[2] || "Variant",
-            });
-          }
-        }
-      }
-      if (inTypeBlock) {
-        if (TYPE_CLOSE.test(line)) inTypeBlock = false;
-      } else if (PROC_OPEN.test(line)) {
-        inProcedure++;
-      } else if (PROC_CLOSE.test(line) && inProcedure > 0) {
-        inProcedure--;
-      }
-    }
+    symbols.push(...parseSymbols(content, module));
   }
   return {
     content: [{ type: "text", text: JSON.stringify(symbols, null, 2) }],
