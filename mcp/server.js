@@ -180,6 +180,10 @@ export function handleGetSymbols(projectDir, _args) {
     while ((m = fnRe.exec(content)) !== null) {
       symbols.push({ name: m[1], kind: "Function", module });
     }
+    const propRe = /\bProperty\s+(Get|Let|Set)\s+(\w+)\s*\(/g;
+    while ((m = propRe.exec(content)) !== null) {
+      symbols.push({ name: m[2], kind: `Property ${m[1]}`, module });
+    }
   }
   return {
     content: [{ type: "text", text: JSON.stringify(symbols, null, 2) }],
