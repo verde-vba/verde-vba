@@ -199,6 +199,46 @@ describe("handleGetSymbols", () => {
     expect(appName.type).toBeUndefined();
   });
 
+  it("detects user-defined Type blocks without leaking fields", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source =
+      "Option Explicit\n" +
+      "\n" +
+      "Public Type Customer\n" +
+      "    Id As Long\n" +
+      "    Name As String\n" +
+      "End Type\n" +
+      "\n" +
+      "Private Type Internal\n" +
+      "    Value As Variant\n" +
+      "End Type\n";
+    writeFileSync(join(tmpDir, "Types.bas"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Customer",
+          kind: "Type",
+          module: "Types",
+        }),
+        expect.objectContaining({
+          name: "Internal",
+          kind: "Type",
+          module: "Types",
+        }),
+      ])
+    );
+    // Fields declared inside a Type block must not leak as module symbols.
+    expect(symbols.find((s) => s.name === "Id")).toBeUndefined();
+    expect(symbols.find((s) => s.name === "Name")).toBeUndefined();
+    expect(symbols.find((s) => s.name === "Value")).toBeUndefined();
+  });
+
   it("returns Property Get/Let/Set procedures as symbols", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
     const source =
