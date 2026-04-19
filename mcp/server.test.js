@@ -165,6 +165,40 @@ describe("handleGetSymbols", () => {
     expect(symbols.find((s) => s.name === "localOnly")).toBeUndefined();
   });
 
+  it("detects module-level Const declarations", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source =
+      "Option Explicit\n" +
+      "\n" +
+      "Public Const MAX_ROWS As Long = 1000\n" +
+      'Private Const APP_NAME = "Verde"\n';
+    writeFileSync(join(tmpDir, "Consts.bas"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "MAX_ROWS",
+          kind: "Constant",
+          module: "Consts",
+          type: "Long",
+        }),
+        expect.objectContaining({
+          name: "APP_NAME",
+          kind: "Constant",
+          module: "Consts",
+        }),
+      ])
+    );
+    // APP_NAME has no `As` — type field must be absent (impl choice pinned here).
+    const appName = symbols.find((s) => s.name === "APP_NAME");
+    expect(appName.type).toBeUndefined();
+  });
+
   it("returns Property Get/Let/Set procedures as symbols", async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
     const source =
