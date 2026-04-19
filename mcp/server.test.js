@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { existsSync } from "fs";
+import { afterEach, describe, it, expect } from "vitest";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { getProjectDir } from "./server.js";
+import { tmpdir } from "os";
+import { getProjectDir, handleGetSymbols } from "./server.js";
 
 // Sanity test: confirms vitest is wired up correctly for the mcp package.
 // server.js now guards main() with an isMainModule check, so importing
@@ -22,5 +23,36 @@ describe("mcp test infrastructure", () => {
     // Successful import already proves the guard works; this is a belt-
     // and-suspenders check that an export is actually callable.
     expect(typeof getProjectDir).toBe("function");
+  });
+});
+
+describe("handleGetSymbols", () => {
+  let tmpDir;
+
+  afterEach(() => {
+    if (tmpDir && existsSync(tmpDir)) {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a Sub procedure as a symbol", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source = 'Sub Hello()\n    MsgBox "hi"\nEnd Sub\n';
+    writeFileSync(join(tmpDir, "Module1.bas"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Hello",
+          kind: "Sub",
+          module: "Module1",
+        }),
+      ])
+    );
   });
 });
