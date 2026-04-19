@@ -194,6 +194,11 @@ const PROC_CLOSE = /^\s*End\s+(?:Sub|Function|Property)\b/i;
 // Module-level variable declaration: capture name + optional As <Type>.
 const VAR_LINE = /^\s*(?:Public|Private|Dim)\s+(\w+)(?:\s+As\s+([\w.]+))?/i;
 
+// Module-level Const declaration. VAR_LINE would also match `Public Const X`
+// since its name group ends up as "Const" — test constants BEFORE VAR_LINE.
+const CONST_LINE =
+  /^\s*(?:Public|Private)?\s*Const\s+(\w+)(?:\s+As\s+([\w.]+))?\s*=/i;
+
 export function handleGetSymbols(projectDir, _args) {
   const files = listModuleFiles(projectDir);
   const symbols = [];
@@ -214,14 +219,21 @@ export function handleGetSymbols(projectDir, _args) {
     let inProcedure = 0;
     for (const line of content.split("\n")) {
       if (inProcedure === 0) {
-        const v = line.match(VAR_LINE);
-        if (v) {
-          symbols.push({
-            name: v[1],
-            kind: "Variable",
-            module,
-            type: v[2] || "Variant",
-          });
+        const c = line.match(CONST_LINE);
+        if (c) {
+          const sym = { name: c[1], kind: "Constant", module };
+          if (c[2]) sym.type = c[2];
+          symbols.push(sym);
+        } else {
+          const v = line.match(VAR_LINE);
+          if (v) {
+            symbols.push({
+              name: v[1],
+              kind: "Variable",
+              module,
+              type: v[2] || "Variant",
+            });
+          }
         }
       }
       if (PROC_OPEN.test(line)) inProcedure++;
