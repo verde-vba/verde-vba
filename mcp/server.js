@@ -199,6 +199,10 @@ const VAR_LINE = /^\s*(?:Public|Private|Dim)\s+(\w+)(?:\s+As\s+([\w.]+))?/i;
 const CONST_LINE =
   /^\s*(?:Public|Private)?\s*Const\s+(\w+)(?:\s+As\s+([\w.]+))?\s*=/i;
 
+// User-defined Type block opener: `[Public|Private] Type Name`.
+const TYPE_OPEN = /^\s*(?:Public|Private)?\s*Type\s+(\w+)\b/i;
+const TYPE_CLOSE = /^\s*End\s+Type\b/i;
+
 export function handleGetSymbols(projectDir, _args) {
   const files = listModuleFiles(projectDir);
   const symbols = [];
@@ -214,11 +218,20 @@ export function handleGetSymbols(projectDir, _args) {
         symbols.push({ ...toSymbol(m), module });
       }
     }
-    // Line patterns (Dim/Public/Private variables) need scope gating so
-    // locals inside a procedure aren't mistaken for module-level decls.
+    // Line patterns (Dim/Public/Private/Const/Type) need scope gating so
+    // locals inside a procedure and fields inside a Type block don't leak
+    // as module-level symbols.
     let inProcedure = 0;
+    let inTypeBlock = false;
     for (const line of content.split("\n")) {
-      if (inProcedure === 0) {
+      const atModuleScope = inProcedure === 0 && !inTypeBlock;
+      if (atModuleScope) {
+        const t = line.match(TYPE_OPEN);
+        if (t) {
+          symbols.push({ name: t[1], kind: "Type", module });
+          inTypeBlock = true;
+          continue;
+        }
         const c = line.match(CONST_LINE);
         if (c) {
           const sym = { name: c[1], kind: "Constant", module };
@@ -236,8 +249,13 @@ export function handleGetSymbols(projectDir, _args) {
           }
         }
       }
-      if (PROC_OPEN.test(line)) inProcedure++;
-      else if (PROC_CLOSE.test(line) && inProcedure > 0) inProcedure--;
+      if (inTypeBlock) {
+        if (TYPE_CLOSE.test(line)) inTypeBlock = false;
+      } else if (PROC_OPEN.test(line)) {
+        inProcedure++;
+      } else if (PROC_CLOSE.test(line) && inProcedure > 0) {
+        inProcedure--;
+      }
     }
   }
   return {
