@@ -350,124 +350,134 @@ export function handleDeleteModule(projectDir, args) {
   return { content: [{ type: "text", text: "Module deleted" }] };
 }
 
+// Exported so tests can pin registration (guard against accidental
+// deregistration of tools) without spinning up the stdio server.
+export const TOOLS = [
+  {
+    name: "get_project_outline",
+    description:
+      "Get full module structure map and sheet info for the project",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_module_outline",
+    description: "Get the outline of a single module",
+    inputSchema: {
+      type: "object",
+      properties: { module: { type: "string" } },
+      required: ["module"],
+    },
+  },
+  {
+    name: "get_procedure",
+    description: "Get the source of a single procedure",
+    inputSchema: {
+      type: "object",
+      properties: {
+        module: { type: "string" },
+        procedure: { type: "string" },
+      },
+      required: ["module", "procedure"],
+    },
+  },
+  {
+    name: "get_lines",
+    description: "Get lines from a module by range",
+    inputSchema: {
+      type: "object",
+      properties: {
+        module: { type: "string" },
+        start: { type: "number" },
+        end: { type: "number" },
+      },
+      required: ["module", "start", "end"],
+    },
+  },
+  {
+    name: "get_workbook_context",
+    description: "Get sheet names, tables, and named ranges",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_symbols",
+    description:
+      "Get all symbols (procedures, variables, constants, types) across the project with type info where available. ~200-500 tokens.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "search_code",
+    description: "Search code across all modules using a pattern",
+    inputSchema: {
+      type: "object",
+      properties: { pattern: { type: "string" } },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "patch_procedure",
+    description: "Replace a procedure's source code",
+    inputSchema: {
+      type: "object",
+      properties: {
+        module: { type: "string" },
+        procedure: { type: "string" },
+        newSource: { type: "string" },
+      },
+      required: ["module", "procedure", "newSource"],
+    },
+  },
+  {
+    name: "patch_lines",
+    description: "Replace a range of lines in a module",
+    inputSchema: {
+      type: "object",
+      properties: {
+        module: { type: "string" },
+        start: { type: "number" },
+        end: { type: "number" },
+        newContent: { type: "string" },
+      },
+      required: ["module", "start", "end", "newContent"],
+    },
+  },
+  {
+    name: "write_module",
+    description: "Overwrite an entire module",
+    inputSchema: {
+      type: "object",
+      properties: {
+        module: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["module", "content"],
+    },
+  },
+  {
+    name: "create_module",
+    description: "Create a new VBA module",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        type: { type: "string", enum: ["bas", "cls"] },
+        content: { type: "string" },
+      },
+      required: ["name", "type"],
+    },
+  },
+  {
+    name: "delete_module",
+    description: "Delete a VBA module",
+    inputSchema: {
+      type: "object",
+      properties: { module: { type: "string" } },
+      required: ["module"],
+    },
+  },
+];
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: "get_project_outline",
-      description:
-        "Get full module structure map and sheet info for the project",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "get_module_outline",
-      description: "Get the outline of a single module",
-      inputSchema: {
-        type: "object",
-        properties: { module: { type: "string" } },
-        required: ["module"],
-      },
-    },
-    {
-      name: "get_procedure",
-      description: "Get the source of a single procedure",
-      inputSchema: {
-        type: "object",
-        properties: {
-          module: { type: "string" },
-          procedure: { type: "string" },
-        },
-        required: ["module", "procedure"],
-      },
-    },
-    {
-      name: "get_lines",
-      description: "Get lines from a module by range",
-      inputSchema: {
-        type: "object",
-        properties: {
-          module: { type: "string" },
-          start: { type: "number" },
-          end: { type: "number" },
-        },
-        required: ["module", "start", "end"],
-      },
-    },
-    {
-      name: "get_workbook_context",
-      description: "Get sheet names, tables, and named ranges",
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
-      name: "search_code",
-      description: "Search code across all modules using a pattern",
-      inputSchema: {
-        type: "object",
-        properties: { pattern: { type: "string" } },
-        required: ["pattern"],
-      },
-    },
-    {
-      name: "patch_procedure",
-      description: "Replace a procedure's source code",
-      inputSchema: {
-        type: "object",
-        properties: {
-          module: { type: "string" },
-          procedure: { type: "string" },
-          newSource: { type: "string" },
-        },
-        required: ["module", "procedure", "newSource"],
-      },
-    },
-    {
-      name: "patch_lines",
-      description: "Replace a range of lines in a module",
-      inputSchema: {
-        type: "object",
-        properties: {
-          module: { type: "string" },
-          start: { type: "number" },
-          end: { type: "number" },
-          newContent: { type: "string" },
-        },
-        required: ["module", "start", "end", "newContent"],
-      },
-    },
-    {
-      name: "write_module",
-      description: "Overwrite an entire module",
-      inputSchema: {
-        type: "object",
-        properties: {
-          module: { type: "string" },
-          content: { type: "string" },
-        },
-        required: ["module", "content"],
-      },
-    },
-    {
-      name: "create_module",
-      description: "Create a new VBA module",
-      inputSchema: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          type: { type: "string", enum: ["bas", "cls"] },
-          content: { type: "string" },
-        },
-        required: ["name", "type"],
-      },
-    },
-    {
-      name: "delete_module",
-      description: "Delete a VBA module",
-      inputSchema: {
-        type: "object",
-        properties: { module: { type: "string" } },
-        required: ["module"],
-      },
-    },
-  ],
+  tools: TOOLS,
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -485,6 +495,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return handleGetLines(projectDir, args);
     case "get_workbook_context":
       return handleGetWorkbookContext(projectDir, args);
+    case "get_symbols":
+      return handleGetSymbols(projectDir, args);
     case "search_code":
       return handleSearchCode(projectDir, args);
     case "patch_procedure":

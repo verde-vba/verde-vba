@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
-import { getProjectDir, handleGetSymbols } from "./server.js";
+import { getProjectDir, handleGetSymbols, TOOLS } from "./server.js";
 
 // Sanity test: confirms vitest is wired up correctly for the mcp package.
 // server.js now guards main() with an isMainModule check, so importing
@@ -23,6 +23,12 @@ describe("mcp test infrastructure", () => {
     // Successful import already proves the guard works; this is a belt-
     // and-suspenders check that an export is actually callable.
     expect(typeof getProjectDir).toBe("function");
+  });
+});
+
+describe("MCP tool registration", () => {
+  it("registers get_symbols in TOOLS list", () => {
+    expect(TOOLS.some((t) => t.name === "get_symbols")).toBe(true);
   });
 });
 
