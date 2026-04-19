@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+mcp/node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+*.exe
+*.msi
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nix
+result
+
+# Local env
+*.local
