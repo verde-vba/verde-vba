@@ -77,4 +77,43 @@ describe("handleGetSymbols", () => {
       ])
     );
   });
+
+  it("returns Property Get/Let/Set procedures as symbols", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source =
+      "Property Get Name() As String\n" +
+      "End Property\n" +
+      "\n" +
+      "Property Let Name(value As String)\n" +
+      "End Property\n" +
+      "\n" +
+      "Property Set Target(obj As Object)\n" +
+      "End Property\n";
+    writeFileSync(join(tmpDir, "Person.cls"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Name",
+          kind: "Property Get",
+          module: "Person",
+        }),
+        expect.objectContaining({
+          name: "Name",
+          kind: "Property Let",
+          module: "Person",
+        }),
+        expect.objectContaining({
+          name: "Target",
+          kind: "Property Set",
+          module: "Person",
+        }),
+      ])
+    );
+  });
 });
