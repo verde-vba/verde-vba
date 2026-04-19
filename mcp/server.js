@@ -165,6 +165,23 @@ export function handleSearchCode(projectDir, args) {
   };
 }
 
+export function handleGetSymbols(projectDir, _args) {
+  const files = listModuleFiles(projectDir);
+  const symbols = [];
+  for (const file of files) {
+    const module = basename(file, extname(file));
+    const content = readFileSync(join(projectDir, file), "utf-8");
+    const re = /\bSub\s+(\w+)\s*\(/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      symbols.push({ name: m[1], kind: "Sub", module });
+    }
+  }
+  return {
+    content: [{ type: "text", text: JSON.stringify(symbols, null, 2) }],
+  };
+}
+
 export function handlePatchProcedure(projectDir, args) {
   const filePath = join(projectDir, args.module);
   if (!existsSync(filePath))
