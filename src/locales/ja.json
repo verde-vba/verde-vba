@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "Verde"
+  },
+  "menu": {
+    "open": ".xlsm を開く",
+    "syncToExcel": "Excel に同期",
+    "syncFromExcel": "Excel から同期",
+    "settings": "設定",
+    "theme": "テーマ",
+    "language": "言語"
+  },
+  "status": {
+    "ready": "準備完了",
+    "syncing": "Excel に同期中...",
+    "synced": "同期完了",
+    "readOnly": "読み取り専用（他のユーザーがロック中）",
+    "saved": "{{filename}} を保存しました"
+  },
+  "lock": {
+    "title": "ファイルがロックされています",
+    "message": "このファイルは {{machine}} の {{user}} が {{time}} から編集中です。",
+    "openReadOnly": "読み取り専用で開く",
+    "forceOpen": "強制的に開く",
+    "cancel": "キャンセル"
+  },
+  "conflict": {
+    "title": "競合が検出されました",
+    "message": "{{count}} 個のモジュールが Verde と Excel の両方で変更されています。",
+    "keepFile": "Verde 側を保持",
+    "keepExcel": "Excel 側を保持"
+  },
+  "trust": {
+    "title": "セットアップが必要です",
+    "message": "Excel の設定で「VBA プロジェクト オブジェクト モデルへのアクセスを信頼する」を有効にしてください。",
+    "howTo": "設定方法を見る"
+  },
+  "editor": {
+    "noProject": "プロジェクト未開",
+    "welcome": "AI ネイティブ VBA 開発環境",
+    "openPrompt": ".xlsm ファイルを開いて始めましょう",
+    "rightClickTip": "ヒント: .xlsm ファイルを右クリック → Verde で開く"
+  },
+  "outline": {
+    "title": "アウトライン"
+  },
+  "explorer": {
+    "title": "エクスプローラー",
+    "noModules": "モジュールなし"
+  },
+  "settings": {
+    "title": "設定",
+    "themeSystem": "システム",
+    "themeLight": "ライト",
+    "themeDark": "ダーク",
+    "fontSize": "フォントサイズ",
+    "fontFamily": "フォントファミリー",
+    "tabSize": "タブサイズ",
+    "wordWrap": "折り返し",
+    "minimap": "ミニマップ",
+    "autoSync": "保存時に自動でExcelに同期"
+  }
+}

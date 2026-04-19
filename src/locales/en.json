@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "Verde"
+  },
+  "menu": {
+    "open": "Open .xlsm",
+    "syncToExcel": "Sync to Excel",
+    "syncFromExcel": "Sync from Excel",
+    "settings": "Settings",
+    "theme": "Theme",
+    "language": "Language"
+  },
+  "status": {
+    "ready": "Ready",
+    "syncing": "Syncing to Excel...",
+    "synced": "Synced",
+    "readOnly": "Read-Only (locked by another user)",
+    "saved": "Saved {{filename}}"
+  },
+  "lock": {
+    "title": "File is locked",
+    "message": "This file is being edited by {{user}} on {{machine}} since {{time}}.",
+    "openReadOnly": "Open Read-Only",
+    "forceOpen": "Force Open",
+    "cancel": "Cancel"
+  },
+  "conflict": {
+    "title": "Conflict detected",
+    "message": "{{count}} module(s) have been modified in both Verde and Excel.",
+    "keepFile": "Keep Verde version",
+    "keepExcel": "Keep Excel version"
+  },
+  "trust": {
+    "title": "Setup Required",
+    "message": "Please enable 'Trust access to the VBA project object model' in Excel settings.",
+    "howTo": "How to enable"
+  },
+  "editor": {
+    "noProject": "No project open",
+    "welcome": "AI-native VBA development environment",
+    "openPrompt": "Open .xlsm file to get started",
+    "rightClickTip": "Tip: Right-click any .xlsm file → Open with Verde"
+  },
+  "outline": {
+    "title": "Outline"
+  },
+  "explorer": {
+    "title": "Explorer",
+    "noModules": "No modules"
+  },
+  "settings": {
+    "title": "Settings",
+    "themeSystem": "System",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "fontSize": "Font Size",
+    "fontFamily": "Font Family",
+    "tabSize": "Tab Size",
+    "wordWrap": "Word Wrap",
+    "minimap": "Minimap",
+    "autoSync": "Auto sync to Excel on save"
+  }
+}
