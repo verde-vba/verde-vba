@@ -187,18 +187,45 @@ function moduleNameFor(file, source) {
   return basename(file, extname(file));
 }
 
+// Procedure openers push depth so nested declarations are ignored.
+const PROC_OPEN = /^\s*(?:Public|Private|Friend)?\s*(?:Sub|Function|Property)\s+\w+/i;
+const PROC_CLOSE = /^\s*End\s+(?:Sub|Function|Property)\b/i;
+
+// Module-level variable declaration: capture name + optional As <Type>.
+const VAR_LINE = /^\s*(?:Public|Private|Dim)\s+(\w+)(?:\s+As\s+([\w.]+))?/i;
+
 export function handleGetSymbols(projectDir, _args) {
   const files = listModuleFiles(projectDir);
   const symbols = [];
   for (const file of files) {
     const content = readFileSync(join(projectDir, file), "utf-8");
     const module = moduleNameFor(file, content);
+    // Block patterns (Sub/Function/Property) scan whole file, since they're
+    // already anchored on their own declaration line.
     for (const [regex, toSymbol] of SYMBOL_PATTERNS) {
       regex.lastIndex = 0;
       let m;
       while ((m = regex.exec(content)) !== null) {
         symbols.push({ ...toSymbol(m), module });
       }
+    }
+    // Line patterns (Dim/Public/Private variables) need scope gating so
+    // locals inside a procedure aren't mistaken for module-level decls.
+    let inProcedure = 0;
+    for (const line of content.split("\n")) {
+      if (inProcedure === 0) {
+        const v = line.match(VAR_LINE);
+        if (v) {
+          symbols.push({
+            name: v[1],
+            kind: "Variable",
+            module,
+            type: v[2] || "Variant",
+          });
+        }
+      }
+      if (PROC_OPEN.test(line)) inProcedure++;
+      else if (PROC_CLOSE.test(line) && inProcedure > 0) inProcedure--;
     }
   }
   return {
