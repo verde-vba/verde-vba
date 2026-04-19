@@ -25,3 +25,14 @@ result
 
 # Local env
 *.local
+
+
+# Added by cargo
+
+/target
+
+# Guard against stray root-level Rust scaffolding.
+# The real Rust crate lives at src-tauri/Cargo.toml; src/ is the React app.
+/Cargo.toml
+/Cargo.lock
+/src/main.rs
