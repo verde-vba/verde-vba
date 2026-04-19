@@ -177,12 +177,22 @@ const SYMBOL_PATTERNS = [
   ],
 ];
 
+// VBA exports embed the authoritative module name in an Attribute line.
+// Prefer it over the filename basename, which is just an export artifact.
+const VB_NAME_ATTR = /^\s*Attribute\s+VB_Name\s*=\s*"([^"]+)"/m;
+
+function moduleNameFor(file, source) {
+  const match = source.match(VB_NAME_ATTR);
+  if (match) return match[1];
+  return basename(file, extname(file));
+}
+
 export function handleGetSymbols(projectDir, _args) {
   const files = listModuleFiles(projectDir);
   const symbols = [];
   for (const file of files) {
-    const module = basename(file, extname(file));
     const content = readFileSync(join(projectDir, file), "utf-8");
+    const module = moduleNameFor(file, content);
     for (const [regex, toSymbol] of SYMBOL_PATTERNS) {
       regex.lastIndex = 0;
       let m;
