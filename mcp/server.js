@@ -165,24 +165,30 @@ export function handleSearchCode(projectDir, args) {
   };
 }
 
+// Each entry: [regex, (match) => ({ name, kind })]
+// Regex must be /g and capture the identifier in group 1 (and for Property,
+// the variant Get|Let|Set in an earlier group).
+const SYMBOL_PATTERNS = [
+  [/\bSub\s+(\w+)\s*\(/g, (m) => ({ name: m[1], kind: "Sub" })],
+  [/\bFunction\s+(\w+)\s*\(/g, (m) => ({ name: m[1], kind: "Function" })],
+  [
+    /\bProperty\s+(Get|Let|Set)\s+(\w+)\s*\(/g,
+    (m) => ({ name: m[2], kind: `Property ${m[1]}` }),
+  ],
+];
+
 export function handleGetSymbols(projectDir, _args) {
   const files = listModuleFiles(projectDir);
   const symbols = [];
   for (const file of files) {
     const module = basename(file, extname(file));
     const content = readFileSync(join(projectDir, file), "utf-8");
-    const re = /\bSub\s+(\w+)\s*\(/g;
-    let m;
-    while ((m = re.exec(content)) !== null) {
-      symbols.push({ name: m[1], kind: "Sub", module });
-    }
-    const fnRe = /\bFunction\s+(\w+)\s*\(/g;
-    while ((m = fnRe.exec(content)) !== null) {
-      symbols.push({ name: m[1], kind: "Function", module });
-    }
-    const propRe = /\bProperty\s+(Get|Let|Set)\s+(\w+)\s*\(/g;
-    while ((m = propRe.exec(content)) !== null) {
-      symbols.push({ name: m[2], kind: `Property ${m[1]}`, module });
+    for (const [regex, toSymbol] of SYMBOL_PATTERNS) {
+      regex.lastIndex = 0;
+      let m;
+      while ((m = regex.exec(content)) !== null) {
+        symbols.push({ ...toSymbol(m), module });
+      }
     }
   }
   return {
