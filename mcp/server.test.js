@@ -55,4 +55,26 @@ describe("handleGetSymbols", () => {
       ])
     );
   });
+
+  it("returns a Function procedure as a symbol", async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-test-"));
+    const source =
+      "Function Add(a As Long, b As Long) As Long\n    Add = a + b\nEnd Function\n";
+    writeFileSync(join(tmpDir, "MathUtils.bas"), source, "utf-8");
+
+    const result = await handleGetSymbols(tmpDir, {});
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+    const symbols = Array.isArray(parsed) ? parsed : parsed.symbols;
+
+    expect(symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Add",
+          kind: "Function",
+          module: "MathUtils",
+        }),
+      ])
+    );
+  });
 });
