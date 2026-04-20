@@ -191,8 +191,36 @@ impl ProjectManager {
         Ok(())
     }
 
-    pub async fn sync_to_excel(&self, _project_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // TODO: PowerShell COM経由でExcelにインポート
+    /// Bulk-push every module under the project directory into the bound xlsm
+    /// via `VbaBridge::import`. Happy path only: assumes meta exists and every
+    /// import succeeds. Edge cases (empty module set, missing meta, per-module
+    /// recovery) are intentionally deferred to the TDD loop in Phase 3.
+    pub async fn sync_to_excel(&self, project_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let project_dir = Self::project_dir(project_id);
+        // Pull xlsm_path out of meta and drop the meta before crossing any
+        // .await — `Box<dyn Error>` is !Send and would poison the future.
+        let xlsm_path = Self::read_meta(project_id)?.xlsm_path;
+        let source_dir = project_dir.to_string_lossy().to_string();
+
+        for entry in std::fs::read_dir(&project_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            VbaBridge::import(&xlsm_path, &source_dir, &name)
+                .await
+                .map_err(Self::classify_import_error)?;
+            // Refresh meta hash from the on-disk bytes we just imported so a
+            // subsequent conflict check sees the workbook as in sync.
+            let bytes = std::fs::read(entry.path())?;
+            let content = String::from_utf8_lossy(&bytes).into_owned();
+            Self::update_module_hash(project_id, &name, &content)?;
+        }
+
         Ok(())
     }
 
