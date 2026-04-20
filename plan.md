@@ -1217,3 +1217,142 @@ product / PBI conversation rather than another silent re-scan.
   4. If neither path is viable, Sprint 15 may return to refinement-
      only — but must explicitly record why the escalation did not
      yield a pickup, to keep the audit trail honest.
+
+# Sprint 15 — Type-bypass arc completion for `main.tsx` root lookup
+
+## Goal
+
+Close the last remaining non-null assertion under `src/**`:
+`document.getElementById("root")!` at `src/main.tsx:9`. Sprint 11's
+plan.md declared the "type-system bypass" arc complete with a
+post-sprint grep, but that probe concentrated on
+`src/App.tsx` / `src/hooks/` / `src/components/` and missed the
+entry-point residual. Sprint 15 rectifies the claim and finishes
+the arc by guard-ing the root element lookup.
+
+## Path chosen
+
+Sprint 14's tail guidance offered four Sprint 15 paths:
+
+1. **Proactive product / PBI conversation** — out-of-band channel
+   (the repo is the only shared surface; no product inbox to
+   consult). Not actionable from within the sprint.
+2. **Fresh PBI pickup** — none arrived since Sprint 14
+   (`git log --oneline -5` shows docs/refactor only back to
+   Sprint 10).
+3. **Deliberate Tidy with explicit relaxation rationale** —
+   **chosen path**. A technical Tidy was surfaced by a fresh
+   `src/**` probe: the entry-point non-null assertion. This is
+   **not** a rule-of-three relaxation (single occurrence, not a
+   duplication pattern), so the rationale is "arc completion /
+   prior probe correction" rather than rule relaxation.
+4. **Observability or test-coverage investment** — not needed;
+   path 3 yielded a concrete deliverable.
+
+## Scope
+
+- **Sole item**: replace
+  `createRoot(document.getElementById("root")!).render(...)` with
+  a lookup → guard → createRoot sequence that throws a named
+  `Error("Root element #root not found")` if the DOM lacks the
+  expected mount point.
+- No test added: entry-point `main.tsx` is not unit-tested in this
+  codebase (by design — it is the composition root). The guard's
+  regression surface is `tsc --noEmit` (narrowing via `if (!root)`)
+  plus the existing 32-test suite exercising App tree behavior.
+- No new dependencies, no locale keys.
+
+## Probes executed (3 of 3 budget)
+
+1. `rg "openModules\.(find|filter|some|every)"` across `src/**` —
+   confirmed Candidate B still rule-of-two (2 sites at
+   `App.tsx:174` / `App.tsx:185`). No change since Sprint 12–14.
+2. `rg "\\bas\\s+(string|number|boolean|unknown|any)\\b|:\\s*any\\b|<any>|!\\s*[.)\\]]"` —
+   surfaced two hits: `monaco-vba.ts:89` (false positive — regex
+   literal `[=<>!]+`) and **`main.tsx:9` (genuine non-null
+   assertion)**. This is the Tidy target.
+3. `rg "^export\\s+(function|const|class|interface|type)\\s+"` —
+   confirmed no obvious dead-export candidates; all enumerated
+   exports have known consumers under `src/**` or are
+   composition-root entry types.
+
+Dead-code candidate (c), test-hygiene (d), and naming (e) candidates
+from the brief were not pursued: (c) probe surfaced no high-
+confidence targets; (d) Sprint 3's `renderAppWithOpenError` and
+Sprint 4's `setupOpenedProject` already carry the test-helper
+discipline; (e) had no concrete surface to probe.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit   | Type         | Summary                                                                      |
+| -------- | ------------ | ---------------------------------------------------------------------------- |
+| 8e15c3d  | refactor(ui) | Guard root element lookup instead of non-null assertion                      |
+| (this)   | docs         | Record Sprint 15 plan and outcomes                                           |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (unchanged: **32** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 15)
+
+## Key decisions
+
+- **Arc completion, not rule-of-three relaxation**: Sprint 14's
+  guidance (3a) mentioned "deliberately-chosen rule-of-two Tidy
+  with the rule-relaxation rationale documented". Sprint 15's
+  target is a *single* non-null assertion at an entry point, not
+  a rule-of-two duplication pattern. The rationale category is
+  therefore "prior claim correction + arc completion" rather than
+  "rule relaxation". Documenting this distinction matters: a
+  future planner reading "Sprint 15 executed despite rule-of-two"
+  should not infer a general relaxation of the rule-of-three
+  gate.
+- **Named `Error` over rethrowing React's implicit `TypeError`**:
+  React's `createRoot(null)` emits a `TypeError` whose message
+  (historically: `target.appendChild is not a function` or
+  similar) depends on the React version and is hard to recognize
+  in an error log. A named error at the boundary (`"Root element
+  #root not found"`) is one grep away from the diagnosis. The
+  behavior diff is restricted to error diagnostic text — the app
+  still fails-fast at the same point, just with a clearer signal.
+- **No unit test for the guard**: `main.tsx` is the composition
+  root; testing it would require jsdom-ing a full document tree
+  and mounting the app just to assert "throws on missing #root".
+  The cost-benefit is poor — the guard is 4 lines of code with
+  trivially inspectable behavior, and the real regression surface
+  (someone removes the `<div id="root">` from `index.html`) would
+  be caught by any smoke test that boots the app, not by a
+  targeted unit test of `main.tsx`.
+- **Sprint 11's claim corrected, not just extended**: Sprint 11's
+  key-decisions section stated the arc was complete. Rather than
+  silently adding Sprint 15 as "one more arc chapter", this
+  section explicitly acknowledges the Sprint 11 probe missed the
+  entry-point file. Durable correctness of the plan.md narrative
+  matters more than a clean "each sprint is self-sufficient"
+  reading — future planners need to know Sprint 11's claim was
+  incomplete to calibrate trust in past post-sprint probes.
+- **Two-commit shape preserved (refactor + docs), not bundled**:
+  the Sprint-15 brief asked for "1 commit" for the Tidy itself;
+  the accompanying docs record is a separate commit, consistent
+  with Sprints 7 / 10 / 11. Bundling the refactor with plan.md
+  changes would mix a load-bearing diff with narrative text and
+  pollute `git blame` on `src/main.tsx`.
+
+## Follow-ups (out of Sprint 15 scope)
+
+- All four Sprint 11 follow-ups remain unchanged (external-input-
+  gated).
+- Sprint 12 candidates A / C remain unchanged; **Candidate B** is
+  unchanged but now worth re-confirming once any new feature
+  touches the tabbed-module state (e.g. a "focus next tab by
+  filename" handler would be the third call site that tips B into
+  execution range).
+- **Post-Sprint 15 bypass status**: one more targeted probe
+  (`rg "\\!\\." src/` + `rg "as\\s+[A-Z]" src/`) should be added
+  to the Sprint 16+ planning checklist before declaring the arc
+  closed again. The Sprint 11 probe pattern (limit search to
+  App/hooks/components) is now a known blind spot.
+- Sprint 16 default: re-run the product / PBI escalation prompt
+  from Sprint 14's tail guidance. Sprint 15 executed a technical
+  Tidy without product input; that is a one-time exception for
+  arc completion, not a new autonomy charter.
