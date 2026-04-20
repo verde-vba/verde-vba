@@ -256,7 +256,7 @@ impl ProjectManager {
     ) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
         let project_dir = Self::project_dir(project_id);
         if !Self::meta_path(project_id).exists() {
-            return Err("Project not found".into());
+            return Err(format!("project not found: {project_id}").into());
         }
         let meta = Self::read_meta(project_id)?;
         Ok(ProjectInfo {
