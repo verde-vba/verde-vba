@@ -31,6 +31,7 @@ function App() {
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
   const [editorContent, setEditorContent] = useState("");
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
+  const [excelOpenPrompt, setExcelOpenPrompt] = useState<string | null>(null);
   // TODO: migrate this flag to settings.rs (Settings.vbaTrustAcknowledged)
   // once the backend exposes it. localStorage is the MVP shortcut so the
   // first-launch guide doesn't reappear across sessions.
@@ -135,10 +136,22 @@ function App() {
   );
 
   const handleSave = useCallback(
-    (content: string) => {
-      if (activeModule) {
-        saveModule(activeModule.filename, content);
+    async (content: string) => {
+      if (!activeModule) return;
+      try {
+        await saveModule(activeModule.filename, content);
+        setExcelOpenPrompt(null);
+      } catch (e) {
+        const parsed = parseBackendError(e);
+        if (parsed.kind === "excelOpen") {
+          setExcelOpenPrompt(parsed.detail);
+        } else {
+          console.error("Save failed:", parsed);
+        }
       }
+      // TODO: wire ConflictDialog here once the backend reports
+      // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
+      // is a save-time lock condition rather than a content conflict).
     },
     [activeModule, saveModule]
   );
@@ -182,6 +195,43 @@ function App() {
           )}
         </div>
       </div>
+
+      {excelOpenPrompt && (
+        <div
+          role="alert"
+          style={{
+            padding: "8px 12px",
+            background: "var(--bg-secondary, #fff4e5)",
+            color: "var(--text-primary)",
+            borderTop: "1px solid var(--border)",
+            fontSize: "12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
+          <span>
+            Cannot save while Excel has the workbook open.
+            {excelOpenPrompt ? ` (${excelOpenPrompt})` : ""}
+          </span>
+          <button
+            type="button"
+            onClick={() => setExcelOpenPrompt(null)}
+            style={{
+              padding: "2px 10px",
+              background: "transparent",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border)",
+              borderRadius: "4px",
+              fontSize: "12px",
+              cursor: "pointer",
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <StatusBar
         status={project ? "ready" : "ready"}
