@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBackendError } from "./error-parse";
+import { parseBackendError, toI18nKey } from "./error-parse";
 
 describe("parseBackendError", () => {
   it("parses a LOCKED error into structured fields", () => {
@@ -91,5 +91,32 @@ describe("parseBackendError", () => {
       kind: "generic",
       message: input,
     });
+  });
+});
+
+describe("toI18nKey", () => {
+  it("maps projectNotFound to errors.projectNotFound", () => {
+    const parsed = parseBackendError("project not found: abc");
+    expect(toI18nKey(parsed)).toBe("errors.projectNotFound");
+  });
+
+  it("maps projectCorrupted to errors.projectMetadataCorrupted", () => {
+    const parsed = parseBackendError("project metadata is corrupted: bad json");
+    expect(toI18nKey(parsed)).toBe("errors.projectMetadataCorrupted");
+  });
+
+  it("maps locked to lock for existing dialog consumers", () => {
+    const parsed = parseBackendError("LOCKED:alice:HOST:2026-04-20T00:00:00Z");
+    expect(toI18nKey(parsed)).toBe("lock");
+  });
+
+  it("maps excelOpen to status.excelOpen for existing banner consumers", () => {
+    const parsed = parseBackendError("EXCEL_OPEN: workbook busy");
+    expect(toI18nKey(parsed)).toBe("status.excelOpen");
+  });
+
+  it("returns undefined for generic so callers fall back to the raw message", () => {
+    const parsed = parseBackendError("something unexpected");
+    expect(toI18nKey(parsed)).toBeUndefined();
   });
 });

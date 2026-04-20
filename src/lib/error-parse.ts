@@ -40,3 +40,32 @@ export function parseBackendError(raw: unknown): ParsedError {
   }
   return { kind: "generic", message: msg };
 }
+
+/**
+ * Map a ParsedError variant to the top-level i18n namespace key used by the
+ * UI. Callers append `.title` / `.message` themselves. Returns `undefined`
+ * for `generic` to signal "no structured key — fall back to the raw message".
+ *
+ * The exhaustive `switch` with a `never` default is deliberate: it makes this
+ * function the single place that enforces "every kind has a mapping", so
+ * adding a new variant to `ParsedError` surfaces a type error here rather
+ * than silently falling through at scattered call sites.
+ */
+export function toI18nKey(parsed: ParsedError): string | undefined {
+  switch (parsed.kind) {
+    case "locked":
+      return "lock";
+    case "excelOpen":
+      return "status.excelOpen";
+    case "projectNotFound":
+      return "errors.projectNotFound";
+    case "projectCorrupted":
+      return "errors.projectMetadataCorrupted";
+    case "generic":
+      return undefined;
+    default: {
+      const _exhaustive: never = parsed;
+      return _exhaustive;
+    }
+  }
+}
