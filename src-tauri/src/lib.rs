@@ -1,4 +1,6 @@
+pub mod cli;
 mod commands;
+mod conflict;
 mod lock;
 mod project;
 mod settings;
