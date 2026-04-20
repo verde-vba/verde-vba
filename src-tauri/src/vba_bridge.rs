@@ -360,4 +360,52 @@ mod tests {
             "validator error must precede platform error, got: {msg}"
         );
     }
+
+    // --- Sprint 23 / PBI #15: env-var passing contract (RED → GREEN) ---
+    //
+    // Pin the post-Sprint-23 contract: injection-flavored input is no
+    // longer a failure mode because caller data never enters the PS
+    // script body. The platform-not-supported error surfaces instead of
+    // a validator rejection. Until Commit 3 lands, these tests fail
+    // because `validate_ps_arg` still short-circuits first — that is the
+    // RED signal the migration has work to do.
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn export_injection_flavored_input_surfaces_platform_error_not_validator_error() {
+        let result = block_on(VbaBridge::export(
+            r#"evil"; calc; #.xlsm"#,
+            "/tmp/ignored",
+        ));
+        let err = result.expect_err("non-Windows must still error out");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("VBA bridge requires Windows"),
+            "env-var path must expose no PS-sensitive surface to mitigate, got: {msg}"
+        );
+        assert!(
+            !msg.contains("PowerShell-sensitive"),
+            "validator must be gone — injection is structurally impossible, got: {msg}"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn import_injection_flavored_module_filename_surfaces_platform_error_not_validator_error() {
+        let result = block_on(VbaBridge::import(
+            "dummy.xlsm",
+            "/tmp/ignored",
+            r#""; rm -rf /; #.bas"#,
+        ));
+        let err = result.expect_err("non-Windows must still error out");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("VBA bridge requires Windows"),
+            "env-var path must expose no PS-sensitive surface to mitigate, got: {msg}"
+        );
+        assert!(
+            !msg.contains("PowerShell-sensitive"),
+            "validator must be gone — injection is structurally impossible, got: {msg}"
+        );
+    }
 }
