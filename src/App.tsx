@@ -8,6 +8,7 @@ import { TabBar } from "./components/TabBar";
 import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useTheme } from "./hooks/useTheme";
+import { useTrust } from "./hooks/useTrust";
 import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./hooks/useVerdeProject";
 import { parseBackendError } from "./lib/error-parse";
 import type { ModuleInfo } from "./lib/types";
@@ -32,20 +33,14 @@ function App() {
     setActiveModule,
     saveModule,
   } = useVerdeProject();
+  const { acknowledged: trustAcknowledged, acknowledge: acknowledgeTrust } =
+    useTrust();
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
   const [editorContent, setEditorContent] = useState("");
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
   const [excelOpenPrompt, setExcelOpenPrompt] = useState<string | null>(null);
   const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(
     null
-  );
-  // TODO: migrate this flag to settings.rs (Settings.vbaTrustAcknowledged)
-  // once the backend exposes it. localStorage is the MVP shortcut so the
-  // first-launch guide doesn't reappear across sessions.
-  const [showTrust, setShowTrust] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      !window.localStorage.getItem("verde:vbaTrustAcknowledged")
   );
 
   const handleOpenFile = useCallback(async () => {
@@ -103,15 +98,8 @@ function App() {
     setLockPrompt(null);
   }, []);
 
-  const acknowledgeTrust = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("verde:vbaTrustAcknowledged", "1");
-    }
-    setShowTrust(false);
-  }, []);
-
   const handleTrustClose = useCallback(() => {
-    acknowledgeTrust();
+    void acknowledgeTrust();
   }, [acknowledgeTrust]);
 
   const handleTrustHowTo = useCallback(() => {
@@ -120,7 +108,7 @@ function App() {
       "https://support.microsoft.com/en-us/office/enable-or-disable-macros-in-microsoft-365-files-12b036fd-d140-4e74-b45e-16fed1a7e5c6",
       "_blank"
     );
-    acknowledgeTrust();
+    void acknowledgeTrust();
   }, [acknowledgeTrust]);
 
   const handleSelectModule = useCallback(
@@ -319,7 +307,7 @@ function App() {
         />
       )}
 
-      {showTrust && (
+      {trustAcknowledged === false && (
         <TrustGuideDialog
           onClose={handleTrustClose}
           onHowTo={handleTrustHowTo}
