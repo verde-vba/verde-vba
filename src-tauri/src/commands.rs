@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::command;
 
+use crate::conflict::ConflictModuleDto;
 use crate::lock::{LockInfo, LockManager};
 use crate::project::{ProjectInfo, ProjectManager};
 use crate::settings::Settings;
@@ -110,6 +111,32 @@ pub async fn get_project_info(project_id: String) -> Result<ProjectInfo, String>
     let manager = ProjectManager::new();
     manager
         .get_info(&project_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn check_conflict(
+    project_id: String,
+    xlsm_path: String,
+) -> Result<Vec<ConflictModuleDto>, String> {
+    let manager = ProjectManager::new();
+    manager
+        .check_conflict(&project_id, &xlsm_path)
+        .await
+        .map(|modules| modules.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn resolve_conflict(
+    project_id: String,
+    xlsm_path: String,
+    side: String,
+) -> Result<(), String> {
+    let manager = ProjectManager::new();
+    manager
+        .resolve_conflict(&project_id, &xlsm_path, &side)
         .await
         .map_err(|e| e.to_string())
 }

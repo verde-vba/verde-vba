@@ -33,6 +33,8 @@ pub fn run() {
             sync_to_excel,
             sync_from_excel,
             get_project_info,
+            check_conflict,
+            resolve_conflict,
             get_settings,
             save_settings,
         ])
