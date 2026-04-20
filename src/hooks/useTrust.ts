@@ -12,7 +12,7 @@ export function useTrust() {
 
   useEffect(() => {
     getSettings()
-      .then((s) => setAcknowledged(s.trust?.vbaAcknowledged ?? false))
+      .then((s) => setAcknowledged(s.trust.vbaAcknowledged))
       .catch(() => setAcknowledged(false));
   }, []);
 
