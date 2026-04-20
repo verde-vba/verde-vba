@@ -32,11 +32,19 @@ export interface SyncSettings {
   auto_sync_to_excel: boolean;
 }
 
+// settings.rs marks TrustSettings with #[serde(rename_all = "camelCase")]
+// so its fields (unlike the other Settings sub-structs which still use
+// snake_case on the wire) arrive as `vbaAcknowledged`, not `vba_acknowledged`.
+export interface TrustSettings {
+  vbaAcknowledged: boolean;
+}
+
 export interface Settings {
   theme: "system" | "light" | "dark";
   language: string;
   editor: EditorSettings;
   sync: SyncSettings;
+  trust: TrustSettings;
 }
 
 export interface ConflictInfo {
