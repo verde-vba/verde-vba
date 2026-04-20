@@ -227,6 +227,91 @@ describe("App save blocked", () => {
       within(banner).getByRole("button", { name: "Dismiss" })
     ).toBeInTheDocument();
   });
+
+  it("renders the localized saveBlocked banner without leaking the SAVE_BLOCKED_READONLY sentinel or firing save_module, when the user tries to save in read-only mode", async () => {
+    // Sprint 9 characterization: pins the consumer side of the
+    // SAVE_BLOCKED_READONLY contract pinned hook-side in Sprint 8. The
+    // sentinel is an exact-string coupling that App.handleSave translates
+    // into a localized banner via `e.message === SAVE_BLOCKED_READONLY`.
+    // Three invariants land in one test so any single drift surfaces:
+    //
+    //   1. Banner text resolves to the en.json status.saveBlocked value —
+    //      a regression that bypasses t(...) and leaks the raw constant
+    //      fails this AND invariant 2.
+    //   2. The sentinel literal never reaches the DOM — the translation
+    //      step must consume it. A catch-site change that re-routes the
+    //      read-only throw into routeParsedError's generic surface would
+    //      either leak "SAVE_BLOCKED_READONLY" or drop it to the generic
+    //      banner; both fail here.
+    //   3. save_module is never invoked — the hook short-circuits in
+    //      read-only mode before the backend call. This is diagonal to
+    //      the Sprint 8 hook-side pin: if App ever bypassed the hook and
+    //      called tauri-commands directly, the hook test would still
+    //      pass but this one catches it.
+    //
+    // Flow: Open .xlsm → LOCKED rejection surfaces LockDialog →
+    //       click "Open Read-Only" → readonly project opens →
+    //       click Editor stub save trigger → hook throws sentinel →
+    //       App catch-site renders saveBlocked Banner.
+    const projectResponse = {
+      project_id: "abc1234567890def",
+      xlsm_path: "C:/tmp/missing.xlsm",
+      project_dir: "C:/verde/projects/abc1234567890def",
+      modules: [
+        { filename: "Module1.bas", module_type: 1, line_count: 0, hash: "h" },
+      ],
+    };
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(defaultSettingsResponse);
+      if (cmd === "open_project") {
+        // Force the lock path so the read-only branch becomes reachable —
+        // handleOpenReadOnly is only invoked from the LockDialog button.
+        return Promise.reject(
+          new Error("LOCKED:alice:WORKSTATION:2026-04-20T12:00:00Z")
+        );
+      }
+      if (cmd === "open_project_readonly") {
+        return Promise.resolve(projectResponse);
+      }
+      // checkConflict is called inside the read-only open flow; resolve
+      // empty so no ConflictDialog steals the Banner assertion below.
+      if (cmd === "check_conflict") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open .xlsm" }));
+
+    // LockDialog surfaces after open_project rejects with LOCKED; click
+    // the Open Read-Only action (label from en.json lock.openReadOnly).
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Read-Only" })
+    );
+
+    // Editor stub renders once activeModule is set on the readonly project;
+    // that's the signal the open flow finished. Then fire the save trigger.
+    const saveButton = await screen.findByTestId("test-save-trigger");
+    fireEvent.click(saveButton);
+
+    // Invariant 1: the saveBlocked Banner renders with the en.json body.
+    // role="alert" uniquely identifies Banner (readOnly strip is role="status").
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(
+      "Cannot save while in Read-Only mode. Close and reopen with write access to save changes."
+    );
+
+    // Invariant 2: the internal sentinel must not appear in the rendered
+    // tree. t("status.saveBlocked") is the user-facing surface; the
+    // constant name is a code-level detail.
+    expect(banner).not.toHaveTextContent("SAVE_BLOCKED_READONLY");
+
+    // Invariant 3: save_module is never invoked when readOnly is true.
+    // Iterating over mock.calls[*][0] is the cheapest way to assert a
+    // command name was never dispatched without coupling to argument shape.
+    expect(
+      invokeMock.mock.calls.map((c) => c[0])
+    ).not.toContain("save_module");
+  });
 });
 
 describe("App file dialog", () => {
