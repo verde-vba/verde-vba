@@ -9,10 +9,11 @@ import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { useErrorRouting } from "./hooks/useErrorRouting";
 import { useTheme } from "./hooks/useTheme";
 import { useTrust } from "./hooks/useTrust";
 import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./hooks/useVerdeProject";
-import { type ParsedError, parseBackendError, toI18nKey } from "./lib/error-parse";
+import { parseBackendError, toI18nKey } from "./lib/error-parse";
 import type { ModuleInfo } from "./lib/types";
 
 interface LockPrompt {
@@ -39,53 +40,20 @@ function App() {
   } = useVerdeProject();
   const { acknowledged: trustAcknowledged, acknowledge: acknowledgeTrust } =
     useTrust();
+  const {
+    errorBanner,
+    setErrorBanner,
+    excelOpenPrompt,
+    setExcelOpenPrompt,
+    routeParsedError,
+  } = useErrorRouting();
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
   const [editorContent, setEditorContent] = useState("");
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
-  const [excelOpenPrompt, setExcelOpenPrompt] = useState<string | null>(null);
   const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(
     null
   );
-  const [errorBanner, setErrorBanner] = useState<ParsedError | null>(null);
 
-  // Routes a ParsedError variant to the appropriate UI surface. Kept as a
-  // single function so the exhaustive `never` default forces every future
-  // ParsedError kind to be handled in one place rather than scattered across
-  // catch sites.
-  //
-  // INVARIANT: `locked` is intentionally NOT routed to the generic
-  // errorBanner. It carries contextual data (xlsmPath) that lives at the
-  // call site, and it has its own dedicated UI (LockDialog). Each catch
-  // site is responsible for short-circuiting locked into setLockPrompt
-  // before delegating the residual kinds here.
-  const routeParsedError = useCallback((parsed: ParsedError) => {
-    switch (parsed.kind) {
-      case "locked":
-        // No-op: locked must be handled at the call site (see invariant
-        // above). Reaching this branch means a caller forgot to
-        // short-circuit; we drop it rather than render a misleading
-        // generic banner that the user cannot act on.
-        return;
-      case "excelOpen":
-        setExcelOpenPrompt(parsed.detail);
-        return;
-      case "projectNotFound":
-      case "projectCorrupted":
-      case "generic":
-        setErrorBanner(parsed);
-        return;
-      default: {
-        const _exhaustive: never = parsed;
-        return _exhaustive;
-      }
-    }
-  }, []);
-
-  // Wraps a caught backend error so each callback short-circuits the
-  // locked kind into setLockPrompt (with the xlsmPath context only the
-  // call site knows) before delegating residual kinds to routeParsedError.
-  // Centralizing this keeps the four catch sites in lockstep on the
-  // "locked never reaches the generic banner" invariant.
   const handleCaughtBackendError = useCallback(
     (e: unknown, xlsmPath: string | null) => {
       const parsed = parseBackendError(e);
