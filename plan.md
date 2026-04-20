@@ -1077,3 +1077,143 @@ re-evaluation has nothing to bisect to).
   input if one arrives. A third consecutive refinement-only sprint
   is acceptable but would argue for a proactive product / PBI
   conversation rather than another silent re-scan.
+
+# Sprint 14 — Third consecutive refinement-only, escalate to product conversation
+
+## Goal
+
+Honor the Sprint 13 tail instruction: re-run the same re-evaluation
+probe since no new PBI has arrived, confirm the Candidate B signal
+and A / C / follow-up gates remain unchanged, and — crucially —
+escalate the advisory from "acceptable but argues for proactive
+conversation" (Sprint 13) to an **explicit recommendation** for a
+product / PBI dialogue before Sprint 15. Three consecutive silent
+re-scans are the threshold where the backlog hygiene signal
+inverts: continuing to probe without fresh input starts burning
+sprint budget that would yield more value from stakeholder
+engagement.
+
+## Scope
+
+- **Sole item**: re-run the Sprint 13 probe set —
+  `rg "openModules\.(find|filter|some|every)"` for Candidate B
+  third call site, `git log --oneline -5` for new PBI arrival
+  signal.
+- Confirm Candidates A and C retain their "why not now" rationale
+  unchanged (no product decision, no second error-routing consumer,
+  no restructure PBI).
+- Confirm all four follow-ups remain parked on the same external
+  gates.
+- **No code change**, **no sprint tag** — refinement-only, same
+  shape as Sprint 12 / 13.
+- **New**: explicit escalation note — Sprint 15 should not silently
+  re-probe. Either a product / PBI conversation surfaces a fresh
+  target, or the planner should document why a fourth consecutive
+  re-scan is justified (e.g. an imminent telemetry availability
+  date, a scheduled product review).
+
+## Re-scan findings
+
+Probes executed:
+- `git log --oneline -5` — no new commits since Sprint 13's
+  `651306c`. The five most recent commits are all docs / refactor
+  from Sprints 10–13. **Signal**: no new PBI has landed.
+- `rg "openModules\.(find|filter|some|every)"` across
+  `src/**/*.{ts,tsx}` — returns the same two `App.tsx` sites
+  (`:174` find, `:185` filter). **Signal**: no third filename-
+  predicate call site has accreted.
+
+Working tree: clean. No uncommitted code drift to inspect.
+
+## Candidate B signal re-confirmation
+
+| Location         | Expression                                                    | Counts toward B? |
+| ---------------- | ------------------------------------------------------------- | ---------------- |
+| `App.tsx:174`    | `openModules.find((m) => m.filename === mod.filename)`        | yes              |
+| `App.tsx:185`    | `openModules.filter((m) => m.filename !== mod.filename)`      | yes              |
+| _(no third)_     | —                                                             | —                |
+
+Rule-of-two, unchanged from Sprint 12 / 13. Continues to defer.
+
+## Candidate A / C / follow-up re-evaluation
+
+- **Candidate A** (`handleKeepFile` / `"verde"` naming): no UX /
+  docs pass has landed. Gate unchanged.
+- **Candidate C** (`App.tsx` 352 LOC split): no second error-
+  routing consumer, no restructure PBI scheduled. Gate unchanged.
+- **Four follow-ups** (TrustGuideDialog URL, Sprint 5 low-priority
+  i18n, `withLoadingState`, `checkConflict` structured logging):
+  product decisions, telemetry, and rule-of-three evidence remain
+  unavailable. All parked.
+
+## Decision
+
+**Sprint 14 is refinement-only, same as Sprint 12 / 13.** One docs
+commit records the re-evaluation; no sprint tag. **Advisory
+escalated** — Sprint 15 planning should include a proactive
+product / PBI conversation rather than another silent re-scan.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit | Type | Summary                                                                |
+| ------ | ---- | ---------------------------------------------------------------------- |
+| (this) | docs | Record Sprint 14 re-evaluation — third consecutive no-change, escalate |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — still green (unchanged: **32** tests across 5 files)
+- `bun run tsc --noEmit` — still clean (exit 0; untouched)
+- `cargo` — untouched (no Rust changes in Sprint 14)
+
+## Key decisions
+
+- **Three consecutive refinement-only sprints crosses the
+  "escalate" threshold**: Sprint 13 framed a third as "acceptable
+  but argues for proactive conversation". Having reached it, the
+  prescription hardens. Silent re-scans scale O(sprint) in process
+  cost while the candidate pool remains O(1) in size — continuing
+  without fresh input turns backlog hygiene into backlog theatre.
+- **"Escalate" is not "abandon"**: the existing candidates A / B / C
+  and four follow-ups remain valid backlog items with documented
+  gates. Escalation means "seek the input that would unblock one
+  of them" (product decision on vocabulary / docs URL / low-priority
+  i18n strings, or telemetry from shipped `checkConflict.warn`),
+  not "discard the catalogue".
+- **Probe re-executed despite identical expected outcome**: one
+  sprint's elapsed time still carries a non-zero probability of a
+  third filename-predicate site appearing via unrelated feature
+  work. The probe is cheap (2 rg invocations, 1 git log); skipping
+  it to save budget would trade a real miss-detection risk for a
+  negligible savings.
+- **Sprint 14's escalation must survive into Sprint 15 planning**:
+  this section is the durable signal. A planner opening plan.md at
+  Sprint 15 start sees three consecutive refinement-only outcomes
+  and an explicit "escalate" recommendation — that is harder to
+  silently ignore than a conversational "might want to talk to
+  product" in a chat log.
+- **No sprint tag, consistent with Sprint 12 / 13**: establishing
+  a pattern where refinement-only sprints skip the tag makes the
+  `git tag` namespace a reliable "executable milestones" index.
+  Tagging a third no-change docs commit would dilute that
+  convention.
+
+## Follow-ups (out of Sprint 14 scope)
+
+- All four Sprint 11 follow-ups remain unchanged (external-input-
+  gated).
+- Sprint 12 candidates A / B / C remain unchanged.
+- **Sprint 15 guidance (explicit)**:
+  1. Before any code-level probe, surface the backlog state to
+     the product / PO channel: share the four gated follow-ups
+     and Candidates A / B / C with current "why not now" notes;
+     ask which (if any) has moved in the last three sprints.
+  2. If product surfaces a fresh PBI, pick it up via the normal
+     Sprint Planning flow.
+  3. If product confirms no movement, document the confirmation
+     in Sprint 15's plan.md section and consider either (a) a
+     deliberately-chosen rule-of-two Tidy with the rule-relaxation
+     rationale documented, or (b) a test-coverage / observability
+     investment that does not depend on external gates.
+  4. If neither path is viable, Sprint 15 may return to refinement-
+     only — but must explicitly record why the escalation did not
+     yield a pickup, to keep the audit trail honest.
