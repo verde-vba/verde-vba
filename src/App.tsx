@@ -4,6 +4,7 @@ import { LockDialog } from "./components/LockDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
+import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useTheme } from "./hooks/useTheme";
 import { useVerdeProject } from "./hooks/useVerdeProject";
@@ -30,6 +31,14 @@ function App() {
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
   const [editorContent, setEditorContent] = useState("");
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
+  // TODO: migrate this flag to settings.rs (Settings.vbaTrustAcknowledged)
+  // once the backend exposes it. localStorage is the MVP shortcut so the
+  // first-launch guide doesn't reappear across sessions.
+  const [showTrust, setShowTrust] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      !window.localStorage.getItem("verde:vbaTrustAcknowledged")
+  );
 
   const handleOpenFile = useCallback(async () => {
     try {
@@ -81,6 +90,26 @@ function App() {
   const handleLockCancel = useCallback(() => {
     setLockPrompt(null);
   }, []);
+
+  const acknowledgeTrust = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("verde:vbaTrustAcknowledged", "1");
+    }
+    setShowTrust(false);
+  }, []);
+
+  const handleTrustClose = useCallback(() => {
+    acknowledgeTrust();
+  }, [acknowledgeTrust]);
+
+  const handleTrustHowTo = useCallback(() => {
+    // TODO: replace with our own docs URL once Verde docs site is live.
+    window.open(
+      "https://support.microsoft.com/en-us/office/enable-or-disable-macros-in-microsoft-365-files-12b036fd-d140-4e74-b45e-16fed1a7e5c6",
+      "_blank"
+    );
+    acknowledgeTrust();
+  }, [acknowledgeTrust]);
 
   const handleSelectModule = useCallback(
     (mod: ModuleInfo) => {
@@ -169,6 +198,13 @@ function App() {
           onForceOpen={handleForceOpen}
           onOpenReadOnly={handleOpenReadOnly}
           onCancel={handleLockCancel}
+        />
+      )}
+
+      {showTrust && (
+        <TrustGuideDialog
+          onClose={handleTrustClose}
+          onHowTo={handleTrustHowTo}
         />
       )}
     </div>
