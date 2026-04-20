@@ -1,8 +1,16 @@
 use serde::{Deserialize, Serialize};
 use tauri::command;
 
+use crate::lock::{LockInfo, LockManager};
 use crate::project::{ProjectInfo, ProjectManager};
 use crate::settings::Settings;
+
+/// Frozen wire format for the lock-conflict error string. The frontend
+/// (Task 2) parses this prefix verbatim to render the "force open" dialog;
+/// changing the shape requires a coordinated frontend update.
+fn format_lock_error(info: &LockInfo) -> String {
+    format!("LOCKED:{}:{}:{}", info.user, info.machine, info.locked_at)
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleSaveRequest {
@@ -13,8 +21,28 @@ pub struct ModuleSaveRequest {
 
 #[command]
 pub async fn open_project(xlsm_path: String) -> Result<ProjectInfo, String> {
+    // Surface a structured LOCKED error iff the lock is held by another
+    // live process. A stale same-machine lock (this host, dead pid) is
+    // handled silently by LockManager::acquire's self-heal path, so we
+    // skip the error in that case and let acquire clean it up.
+    if LockManager::is_locked(&xlsm_path) {
+        if let Some(info) = LockManager::read_lock(&xlsm_path) {
+            let is_stale_same_machine = info.machine == LockManager::current_machine_name()
+                && !LockManager::is_pid_alive(info.pid);
+            if !is_stale_same_machine {
+                return Err(format_lock_error(&info));
+            }
+        }
+    }
+
+    LockManager::acquire(&xlsm_path).map_err(|e| e.to_string())?;
     let manager = ProjectManager::new();
-    manager.open(&xlsm_path).await.map_err(|e| e.to_string())
+    manager.open(&xlsm_path).await.map_err(|e| {
+        // Roll back the lock if the project failed to open so we don't
+        // leave the workbook unusable to other instances.
+        let _ = LockManager::release(&xlsm_path);
+        e.to_string()
+    })
 }
 
 #[command]
