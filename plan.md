@@ -9,13 +9,12 @@ All earlier sprints collapse to one-line rows in the index table below —
 commit-level detail. Compression-only sprints (like Sprint 16 itself) do
 not consume a detail slot, and probe-only refinement sprints occupy one
 slot at whatever density their outcome requires (often < 50 lines).
-Currently detailed: Sprint 21 / 22 / 23. A planner adding a new sprint
+Currently detailed: Sprint 22 / 23 / 24. A planner adding a new sprint
 section must demote the now-oldest detailed sprint into the index row in
-the same commit. Sprint 17–19 remain as pre-existing detail-drift from
-earlier planners that skipped the demotion; a future housekeeping sprint
-should collapse them into index rows.
+the same commit. Sprint 17–19 were folded into index rows during Sprint
+24 housekeeping (closing a pre-existing detail-drift).
 
-## Sprint 3–13 summary index
+## Sprint 3–20 summary index
 
 | Sprint | 主題                                                                            | 主要コミット                                                                    |
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -32,197 +31,13 @@ should collapse them into index rows.
 | 13     | Catalogue re-evaluation, no situation change                                    | Docs `651306c` — `openModules` probe confirmed 2 sites (still rule-of-two); A / C / four follow-ups unchanged; tests 32/32. Tail advisory: a third refinement-only sprint would argue for product conversation. |
 | 14     | Third consecutive refinement-only; escalation advisory to product               | Docs `951c55c` — no code change; `openModules` probe + `git log` re-run unchanged; **Sprint 15 planning must include proactive product / PBI conversation** (durable signal). |
 | 15     | Type-bypass arc completion for `main.tsx` root lookup                           | `8e15c3d` guard root element lookup (non-null assertion removed); docs `22cd27c`. Arc closed for `src/**`; post-sprint probe (`\!\.`, `as\s+[A-Z]`) added to Sprint 16+ checklist. |
+| 17     | Probe-only refinement; orthogonal probe axis validates exercise                 | docs-only (no code commits). `TODO|FIXME|XXX` scan surfaced `App.tsx:211` ConflictDialog TODO as backlog #12 (backend-gated on content-conflict error-kind). Plan-bloat policy promoted from example to explicit preamble rule. Third refinement-only cycle → escalation advisory to product. |
+| 18     | Security hardening: 2 CRITICAL + 2 MEDIUM + Win32 feature-flag bonus            | `32b8d5f` MCP path-traversal (`safeModulePath` whitelist + containment); `7c00520` PS denylist `validate_ps_arg`; `084ee38` lock TTL-7d fallback + `Win32_System_Threading` feature; `c875c58` extract `EXCEL_OPEN_SUBSTRINGS` + JP-locale pinned-negative test (Sprint 25 will flip); `e8064d2` drop dead `current_machine_name`. Pause exited via restart-condition (c). Follow-ups #15/#16/#17 registered. |
+| 19     | App.tsx 責務分割 (352→229 LOC; behavioral change ゼロ)                          | `072b44b` C1 `useErrorRouting` (+7 tests); `352d74c` C2 `useModuleTabs` (+7, stale-closure fix); `702e7fa` C3 `useOpenFile` (+9); `19d7d5a` C4 `useSave` (+7). C5 `ReadOnlyBar` deferred (landed in Sprint 20). Frontend 32 → 62 tests; cargo 55 unchanged. |
 | 20     | C5 `ReadOnlyBar` component extraction + `vi.fn` widening-cast tidy              | `48074d9` RED test; `afa0e27` GREEN extraction; `d4a27e1` wire-up + `useSave.test` widening-cast removal; docs `b3b0b24`. App.tsx LOC 229 → 215; bypass arc still at zero `!\.` hits; `vi.fn<>()` rule-of-three queued (resolved in S21). |
+| 21     | `vi.fn()` cast Tidy First (rule-of-three 到達, 3 hits across 2 files)            | `03a603a` replace `vi.fn() as (Fn)` with typed `vi.fn<(Fn)>()`. Frontend 63/63 tests unchanged; `rg 'vi\.fn\(\) as \(' src/` → 0. Key decision: generic form is vitest's idiomatic pattern (safer than unsafe downward cast). #15 design-weight deferred to Sprint 22 Planning (macOS TDD 不適合認定 → Sprint 22 で env-var 経路確定 → Sprint 23 で実装完了)。 |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
-
-# Sprint 17 — Probe-only refinement; one new backend-gated follow-up surfaced
-
-## Goal
-
-Run a probe set *orthogonal* to Sprints 15 / 16 type-bypass scans
-(`TODO|FIXME|XXX`, `any\b`, `// eslint-disable`) to test whether drift
-since Sprint 15 has accreted new Tidy signals. Secondary goal: promote
-the plan-bloat policy from example to explicit rule in the preamble.
-
-## Probes executed (3 of 3 budget)
-
-1. `rg "TODO|FIXME|XXX" src/` — 2 hits. `App.tsx:155` matches backlog
-   #1 (already catalogued). **`App.tsx:211` is NEW**: `// TODO: wire
-   ConflictDialog here once the backend reports file-vs-Excel content
-   conflicts (different from EXCEL_OPEN...)`. Backend-gated on a new
-   error-kind distinct from EXCEL_OPEN. Logged as backlog #12.
-2. `rg "\bany\b" src/ --type ts` — 2 hits, both natural-language "any"
-   in `App.test.tsx` comments (not the `any` type). False positives.
-3. `rg "// eslint-disable" src/` — 0 hits.
-
-Sprint 15 bypass re-probe (`\!\.`, `as\s+[A-Z]`) skipped: no `src/**`
-commit since `8e15c3d`, so the result would be identical. Re-run
-deferred to the first sprint following any src-level change.
-
-## Decision
-
-**Probe-only, no code change, no sprint tag.** The `App.tsx:211` TODO
-is backend-gated wiring work (not rule-of-three duplication); Sprint
-15's technical-Tidy exception does *not* extend to it. One docs commit.
-Tests / tsc / cargo untouched.
-
-## Key decisions
-
-- **Orthogonal probe axis is the anti-theatre mechanism**: `TODO`
-  scanning is independent of Sprints 15 / 16 bypass scans. A truly
-  exhausted pool must return empty on both axes; one non-empty probe
-  (this sprint's `App.tsx:211`) validates the exercise.
-- **Plan-bloat policy promoted from example to rule**: preamble now
-  states the forward-looking "three most recent detailed" rule
-  explicitly; Sprint 13 demoted to the index table in the same commit
-  to demonstrate the rule (not a backlog bankruptcy).
-- **Escalation signal compounding**: Sprint 14 escalated, Sprint 15
-  took a technical exception, Sprint 17 surfaces a backend-gated TODO.
-  Three distinct sprints pointing at external input as the binding
-  constraint — this is the case for an out-of-band product conversation
-  rather than a Sprint 18 default silent re-probe.
-
-## Follow-ups
-
-- Sprint 18: prefer out-of-band product / backend conversation over
-  a fifth consecutive silent cycle.
-- Re-run bypass probe (`\!\.`, `as\s+[A-Z]`) after the next `src/**`
-  change; current skip must not calcify.
-- Backlog #12 is a Planning pickup (not a Tidy) once the backend
-  error-kind lands: dialog + routing both need design.
-
-# Sprint 18 — Security hardening: 2 CRITICAL + 2 MEDIUM + 1 bonus
-
-## Goal
-
-Pause-breaking security sprint. Five cycles of refinement-only /
-technical-exception work (Sprints 12–17) had fixated on frontend quality
-and **never probed the external-I/O boundary** — specifically the
-PowerShell bridge (`vba_bridge.rs`) and the MCP tool surface
-(`mcp/server.js`). A stakeholder-initiated audit surfaced two CRITICAL
-vulnerabilities plus two MEDIUM correctness issues, all in code that
-the rule-of-three / type-bypass / i18n sweeps had structurally
-sidestepped.
-
-## Pause exit rationale
-
-`plan.md:308` restart condition (c) — "新規 PBI が stakeholder から
-明示的に投入される" — was met by the user explicitly directing the
-planner to address the 4 findings. This is the designed exit, not a
-planner-side re-interpretation of (a) or (b), both of which remain
-unmet.
-
-## Scope
-
-- **PBI #1 (CRITICAL) — MCP path traversal.** `mcp/server.js` handlers
-  composed `join(projectDir, args.module)` without validation. Prompt
-  injection via workbook source could coerce an AI client into writing
-  to `../../.../Startup/pwn.bat` via `write_module`, or deleting
-  arbitrary files via `delete_module`. **Fix**: `safeModulePath`
-  whitelist-regex + resolved-prefix containment check, routed through
-  every handler.
-- **PBI #2 (CRITICAL) — PowerShell injection in `vba_bridge.rs`.**
-  `export` / `import` embedded `xlsm_path`, `output_dir`,
-  `module_name`, `module_path` directly into a PS `-Command` script
-  via `format!` with double-quoted string literals. A workbook whose
-  `VB_Name` was `"; Start-Process calc.exe; #` would execute arbitrary
-  PowerShell on first open. **Fix**: `validate_ps_arg` denylist
-  (`"`, `` ` ``, `$`, `;`, newline, control chars), not
-  `#[cfg(windows)]`-gated so darwin CI exercises the same surface.
-- **PBI #3 (MEDIUM) — Lock wedge via Windows PID reuse.** `is_pid_alive`
-  alone was unreliable for stale detection: a crashed Verde's PID,
-  reassigned to Explorer/notepad, would report alive forever and wedge
-  the lock. **Fix**: unified `LockManager::is_stale` decision table
-  with a 7-day TTL fallback (conservative; long-running Verde sessions
-  remain respected). **Bonus**: `Cargo.toml` was missing
-  `Win32_System_Threading`, which `lock.rs:109` requires — a latent
-  Windows-build break, caught while editing the lock path.
-- **PBI #4 (MEDIUM) — `classify_import_error` locale fragility.** The
-  EXCEL_OPEN substring list was English-only and invisible to grep;
-  on Japanese Excel the "close and retry" dialog never fires. **Fix**:
-  extract to named `EXCEL_OPEN_SUBSTRINGS` const with an explicit
-  doc-comment on the limitation; extract `is_excel_open_error` as a
-  pure predicate; pin each English substring AND the known Japanese
-  miss with tests (the latter must be UPDATED not deleted when
-  follow-up #17 lands).
-
-## Changes landed (on `main`, not pushed)
-
-| Commit  | Type                | Summary                                                       |
-| ------- | ------------------- | ------------------------------------------------------------- |
-| 32b8d5f | `fix(mcp)!`         | Path-traversal hardening (breaking: invalid module throws)    |
-| 7c00520 | `fix(vba-bridge)`   | Reject PS-sensitive chars before `format!`                    |
-| 084ee38 | `fix(lock)`         | TTL fallback for PID reuse + `Win32_System_Threading` feature |
-| c875c58 | `refactor(project)` | Pin EXCEL_OPEN substrings + pin Japanese-locale miss          |
-| e8064d2 | `chore(lock)`       | Drop dead `current_machine_name` helper post-`is_stale`       |
-| (docs)  | `docs(plan)`        | This sprint section + Sprint 14 demotion + backlog updates    |
-
-## Acceptance criteria (verified)
-
-- `cargo test --lib` — **55 passed** (was 46); +9 vba_bridge, +5 lock,
-  +4 project tests.
-- `cargo clippy --lib -- -D warnings` — clean.
-- `bun run test` (frontend) — **32 passed** (unchanged; no src/** touch).
-- `bun run tsc --noEmit` — clean.
-- `npx vitest run` (mcp) — **25 passed** (was 11); +14 path-traversal tests.
-
-## Key decisions
-
-- **Bundle all 4 as one sprint (option A)**: rejected the
-  split-into-4-sprints path because (a) each PBI is narrowly scoped
-  and independently committed, so `git blame` stays clean within each
-  file; (b) batching the Pause-exit signal into one sprint preserves
-  the "security hardening arc" as a single inspectable unit; (c) the
-  plan-bloat policy budgets one detailed slot per sprint, and four
-  separate sprints would have demoted real decision history
-  unnecessarily.
-- **PS validator is denylist, not allowlist, and explicitly MVP**:
-  `validate_ps_arg` rejects `"`, `` ` ``, `$`, `;`, control chars. A
-  strict allowlist would block legitimate Unicode paths (日本語
-  filenames, etc.) the MVP should support. Follow-up #15 tracks the
-  real fix: pass arguments via `-ArgumentList` + `param(...)` so the
-  script body never concatenates caller data.
-- **TTL threshold 7 days, not 24h**: the obvious failure mode of a
-  too-aggressive TTL is silently reaping a legitimate long-running
-  Verde session. 7 days is well past any realistic uninterrupted
-  Verde session (daily laptop sleep/resume cycles, OS updates) while
-  still bounding the PID-reuse wedge window.
-- **EXCEL_OPEN Japanese-locale miss pinned as a negative assertion,
-  not "TODO"**: a comment would rot. A red test is unavoidable
-  feedback for anyone who tries to declare #17 done.
-- **Validator placed above `#[cfg(windows)]` boundary**: darwin CI
-  can run the same unit tests that gate the Windows COM path.
-  Prevents a future planner from weakening the validator on a non-
-  Windows workstation without seeing tests fail.
-- **`Win32_System_Threading` fix bundled with PBI #3**: discovered
-  while reading `lock.rs` for the TTL fix. Splitting it into a
-  separate commit would have been ceremony; the commit message
-  explicitly names the bonus fix so it's still searchable.
-
-## Follow-ups registered (new backlog items)
-
-- **#13**: ConflictDialog wiring for content-conflict reporting
-  (promoted from Sprint 17's `App.tsx:211` TODO — unchanged).
-- **#15**: Migrate `vba_bridge` to `-ArgumentList` / `param(...)`.
-  Denylist is a mitigation, not a design; ideally caller data never
-  reaches a `format!`-built script body.
-- **#16**: Image-name-based lock staleness (`QueryFullProcessImage
-  NameW` on Windows, `/proc/<pid>/comm` on Linux). Robust fix for
-  PID reuse; TTL is a fallback.
-- **#17**: HRESULT-based EXCEL_OPEN classification (locale-agnostic).
-  When landed, flip the Japanese-locale pinned negative test to
-  positive rather than deleting it.
-
-## Advisory to Sprint 19 planner
-
-Sprint 18 exited the Pause *and* delivered substantive fixes, but
-re-entering Pause is the default unless another product signal
-arrives. Three newly-surfaced follow-ups (#15, #16, #17) are all
-design-weight items that deserve explicit Planning rather than
-being absorbed into a silent refinement sprint. If the stakeholder
-channel is quiet, prefer Pause over a Sprint-15-style
-technical-exception pickup: **the exception does not generalize.**
 
 # Consolidated open follow-up backlog
 
@@ -249,79 +64,6 @@ source and the external gate blocking execution.
 | 15  | Migrate `vba_bridge` to `-ArgumentList` / `param(...)`             | S18         | Re-architecture PBI (script body must not concatenate caller data) |
 | 16  | Image-name-based lock staleness (Windows + Linux)                  | S18         | Windows COM/Win32 + Linux procfs expertise on hand |
 | 17  | HRESULT-based EXCEL_OPEN classification (locale-agnostic)          | S18         | COM error-code extraction pathway (blocked on `vba_bridge` rewrite in #15) |
-
-## Sprint 19 (2026-04-21) — App.tsx 責務分割
-
-### Goal
-
-App.tsx (352 LOC) をシングルオーナーな hook 群へ責務分割する。
-frontend 32/32 test を safety net として TDD サイクルで各 extraction を実施。
-behavioral change ゼロ — 構造変更のみ。
-
-### 候補 split (3–5)
-
-**C1 — `useErrorRouting` hook**
-- 抽出対象: `routeParsedError`, `handleCaughtBackendError`, `errorBanner` state
-- 境界: `ParsedError` → UI surface への dispatch logic。render tree への依存なし
-- テスト軸: `routeParsedError` の exhaustive switch, `locked` drop, `excelOpen` / generic
-  routing を hook-level で pin
-- 優先度: **最高**。他 hook (`useOpenFile`, `useSave`) が `handleCaughtBackendError`
-  を参照するため先行抽出が依存解消になる
-
-**C2 — `useModuleTabs` hook**
-- 抽出対象: `openModules` state, `handleSelectModule`, `handleCloseModule`
-- 境界: "開いているタブ一覧 + アクティブモジュール遷移" の完結した state machine
-- テスト軸: open/close/active-transition の各パスを hook-level unit test で pin
-- 優先度: **高**。C1 と独立して抽出可能
-
-**C3 — `useOpenFile` hook**
-- 抽出対象: `lockPrompt` state, `excelOpenPrompt` state (部分),
-  `handleOpenFile`, `handleForceOpen`, `handleOpenReadOnly`, `handleLockCancel`
-- 境界: "Tauri dialog → project open → ロック競合 UI へ routing" の flow
-- テスト軸: `handleForceOpen` の early-return (lockPrompt null), ロック競合 routing
-- 優先度: **中**。C1 完了後に抽出 (`handleCaughtBackendError` を C1 から受け取る shape)
-
-**C4 — `useSave` hook**
-- 抽出対象: `saveBlockedPrompt` state, `handleSave`
-- 境界: "saveModule → 成功/SAVE_BLOCKED_READONLY/backend error の 3-way dispatch"
-- テスト軸: sentinel path (`SAVE_BLOCKED_READONLY`), success clear, error routing
-- 優先度: **中**。C1 完了後に抽出
-
-**C5 — ReadOnly WarningBar (optional component extraction)**
-- 抽出対象: App.tsx:234–248 の `readOnly` banner JSX
-- 境界: 単純な presentational strip。hook ではなく component 抽出
-- テスト軸: `role="status"` render / non-render を snapshot で pin
-- 優先度: **低**。C1–C4 完了後の仕上げとして検討。スコープ超過なら次 sprint に送る
-
-### 実装順序
-
-```
-C1 (useErrorRouting) → C2 (useModuleTabs) 並行可
-C3 (useOpenFile)     → C1 完了後
-C4 (useSave)         → C1 完了後
-C5                   → C1–C4 完了後、スコープ超過なら defer
-```
-
-各抽出ステップ: RED (hook contract test) → GREEN (抽出) → REFACTOR (App.tsx 整理)
-commit 単位: 1 extraction = 1 commit (hook file + App.tsx diff + test)
-
-### 受け入れ基準 (達成)
-
-- `bun run test` 62/62 緑 (既存 32 → 新規 30 hook-level tests 追加)
-- `bun run tsc --noEmit` クリーン
-- App.tsx LOC: 352 → 229 (35% 削減; レンダーツリー合成に集中)
-- `cargo test --lib` 55 緑 (backend 無変更確認)
-
-### 変更コミット
-
-| Commit  | 内容                                      |
-| ------- | ----------------------------------------- |
-| 072b44b | C1: `useErrorRouting` (+7 tests)          |
-| 352d74c | C2: `useModuleTabs` (+7 tests; stale-closure fix) |
-| 702e7fa | C3: `useOpenFile` (+9 tests)              |
-| 19d7d5a | C4: `useSave` (+7 tests)                  |
-
-C5 (ReadOnly WarningBar component) はスコープ超過のため defer。
 
 ## Intentional Pause — 終了記録 (exited 2026-04-21 by Sprint 18)
 
@@ -351,63 +93,6 @@ PBI 投入）により解除され、Sprint 18 として security 4 件に着地
 - **Pause が有効だったのは期間が短かったから**ではなく、「silent probe
   を禁じる」ルールを明示していたから。次に Pause に入る場合もこの
   構造を維持すること（期間は成り行き、条件は厳格）。
-
-# Sprint 21 (2026-04-21) — `vi.fn()` cast Tidy First (rule-of-three)
-
-## Goal
-
-`vi.fn() as (Fn)` 型キャストが 3 件に到達したため、Tidy First として
-`vi.fn<(Fn)>()` ジェネリクス形式へ統一する。構造変更のみ、挙動変更ゼロ。
-
-## Probes executed (Sprint start)
-
-1. `rg '!\.'  src/` → **0 hits**
-2. `rg 'as\s+[A-Z]' src/ --type ts` → production: 0、test: 1件 (error-parse.test.ts — ガード付き正当 assertion、保持)
-3. `rg '@ts-ignore|@ts-expect-error' src/` → **0 hits**
-4. `rg '\bany\b' src/ --type ts` → `expect.any(Error)` とコメントのみ、型 unsafe な `any` なし
-5. `rg 'vi\.fn\(\) as \(' src/` → **3 hits** in 2 files → rule-of-three 到達
-
-## Priority selection
-
-- A (type-bypass): arc 維持 → skip
-- B (#15/#16/#17): #15 は macOS 環境では Windows COM 経路が TDD 不可
-  (非 Windows スタブのみテスト可)。#16 は Win32/procfs 両対応で重い。
-  #17 は #15 に blocked。→ 全件 design-weight 超過、C へ切替
-- C (rule-of-three): `vi.fn() as (...)` 3件到達 → **実行**
-
-## 変更コミット
-
-| Commit  | 内容 |
-| ------- | ---- |
-| 03a603a | `refactor(test): replace vi.fn() casts with typed vi.fn<>()` |
-
-## 受け入れ基準 (達成)
-
-- `bun run test` **63/63** 緑 (変化なし)
-- `bun run tsc --noEmit` クリーン
-- `rg 'vi\.fn\(\) as \(' src/` → 0 hits
-
-## Key decisions
-
-- **`vi.fn<(Fn)>()` はジェネリクス形式が正規の vitest 慣用パターン**:
-  `vi.fn()` の返す `Mock` 型はデフォルト `unknown` 引数。`as (Fn)` は
-  型チェックを回避する unsafe な下方向キャストであり、ジェネリクスによる
-  型付けに置き換えることで型安全性が向上する。
-- **Tidy First 単独 Sprint を採用**: 3件という小さいスコープで
-  挙動変更ゼロのため、RED フェーズは不要。構造変更コミット 1本で完結。
-- **B (#15) は macOS TDD 不適合**: Windows COM 経路のテストは非 Windows
-  環境では書けない。`validate_ps_arg` の除去テストは書けるが、実際の
-  env-var 引き渡し挙動の検証が不可能。次 Sprint で設計を先行させる
-  必要がある（Planning セッション推奨）。
-
-## Follow-ups
-
-- Sprint 18 follow-ups (#15, #16, #17) は依然 design-weight あり。
-  #15 の実装アプローチ（env-var 経由 or `-File` temp script）を
-  次 Planning で明示的に設計してから Sprint 化すること。
-- rule-of-three 監視: `vi.fn<>()` 統一完了。次の duplicate 候補として
-  `useSave hook` の `handleSave` 内 null-guard パターンを継続監視。
-  → **Sprint 22 で確認**: null-guard は1箇所のみ。rule-of-three 未到達。
 
 # Sprint 22 (2026-04-21) — #15 Planning: PS 引数渡しアーキテクチャ設計
 
@@ -725,4 +410,370 @@ denylist と関連 injection テスト群を削除し、caller data は `Command
 - **`.env_clear()` を使わない判断を durable signal として保存**: 将来の
   planner が "env 分離の原則" 名目で `.env_clear()` を足したくなる誘惑を
   防ぐため、Key decisions の当該段に明示的に根拠を置いた。
+
+# Sprint 24 (2026-04-21) — #16 / #17 design-weight 評価 + Sprint 17–19 housekeeping
+
+## Goal
+
+Sprint 23 で #15 が完了し、Sprint 18 で登録された残る 2 件の design-weight
+follow-up (#16 lock staleness, #17 HRESULT EXCEL_OPEN) が blocked 状態から
+解除された。本 Sprint で両者を正面から比較評価し、**Sprint 25 で着手する
+1 件を確定**、もう 1 件の不採用理由を durable に記録する。併せて
+**Sprint 17–19 の index demotion** (plan-bloat rule "3 most recent detailed"
+への pre-existing drift 閉鎖) を同コミットに束ねる。docs-only、コード変更なし。
+
+## Probes executed (Sprint start)
+
+1. `rg '!\.' src/` → 0 hits
+2. `rg 'as\s+[A-Z]' src/ --type ts` → test 1 件 (ガード付き正当 assertion、保持)
+3. `rg '@ts-ignore|@ts-expect-error' src/` → 0 hits
+4. `rg '\bany\b' src/ --type ts` → `expect.any(Error)` のみ
+5. rule-of-three 新規候補: なし (Sprint 22 probe 結果から差分なし)
+
+## Priority selection
+
+- A (type-bypass): arc 維持 → skip
+- B (#16 / #17 design-weight Planning): **採用** — Sprint 22 型 Planning-only Sprint
+- C (rule-of-three): 未到達 → 監視継続
+
+## #16 (lock staleness) design-weight
+
+### 現行 lock 機構
+
+`src-tauri/src/lock.rs` — `LockInfo { user, machine, pid, app, locked_at }` を
+`~$<filename>.xlsm` に JSON 保存。`LockManager::is_stale` 決定表:
+
+| same_machine | PID alive | TTL (7d) | 結果 |
+|--------------|-----------|----------|------|
+| yes | no | — | stale |
+| yes | yes | expired | stale (Sprint 18 fallback) |
+| yes | yes | within | not stale |
+| no | — | expired | stale |
+| no | — | within | not stale |
+
+`is_pid_alive`: Windows `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, ...)`、
+非 Windows `libc::kill(pid, 0)`。
+
+### ギャップ
+
+PID reuse: Verde crash 後に Explorer / notepad 等に同一 PID が再割当されると
+`is_pid_alive` が `true` を返し、lock が TTL (7 日) 経過まで wedge する。
+
+### OS API 差異
+
+| OS | API | 備考 |
+|----|-----|------|
+| Windows | `QueryFullProcessImageNameW(HANDLE, 0, buf, &mut len)` | `OpenProcess` 経由の HANDLE を再利用可能。basename 比較で `verde.exe` 照合。 |
+| Linux | `/proc/<pid>/comm` (15文字 basename) / `readlink /proc/<pid>/exe` (フルパス) | 権限不足で読めないケースは fail-open / fail-close の設計判断が要る。 |
+| macOS | `proc_pidpath(pid, buf, size)` (libproc) or `sysinfo` crate | 開発環境のみ対象 (production ターゲットではない)。 |
+
+### macOS fallback 方針
+
+macOS は dev 環境に限定。選択肢:
+
+1. `#[cfg(any(windows, target_os = "linux"))]` で image-name 比較を有効化、
+   macOS は現行 `is_pid_alive + TTL` にフォールバック
+2. `proc_pidpath` を FFI で叩き、macOS にも実装
+3. `sysinfo` crate を依存として投入、3 OS 統一
+
+**推奨**: 選択肢 1。macOS は dev のみで wedge が起きても dev が即検知できる。
+production (Windows) + CI (Linux) で完全対応すれば要件充足。
+
+### TDD 可能性 (macOS)
+
+- `is_stale_by_image_match(info, observed_name, expected_basename) -> bool` を
+  **pure helper 化**すれば macOS で RED → GREEN 可能。
+- 実 OS API 呼び出しは `#[cfg(...)]` gate 下で Windows / Linux CI のみで実行。
+- Process name provider を trait / fn pointer 注入すると macOS でも
+  integration-flavored test が書ける (Sprint 22 env-var 経路と同じ構造)。
+
+### Approach 比較
+
+| 軸 | (a) OS native API | (b) `sysinfo` crate | (c) TTL 短縮のみ |
+|----|-------------------|---------------------|-----------------|
+| PID reuse 検出 | 構造的 | 構造的 | 緩和のみ (時間窓) |
+| 依存追加 | `windows` crate 既存 + `libc` | `sysinfo` 新規 (~500KB, 起動時間+) | なし |
+| macOS ビルド | cfg-gate + TTL fallback | sysinfo 対応 | 変更なし |
+| macOS TDD | pure helper で可 | crate mock 困難 | N/A (挙動不変) |
+| LOC 増分 | 中 (~80 + tests) | 小 (~30) | 極小 (const 変更) |
+| 依存制御 | 完全 | 外部 crate 追随 | 完全 |
+
+**候補選定**: (a) OS native。`sysinfo` は process-listing 1 箇所の needs に
+対して依存代償が過大 (本プロジェクトは Tauri + windows crate で必要な FFI surface を
+既に保有)。TTL 短縮 (c) は legitimate 長時間セッションを誤 reap するリスクを
+新設するため却下。
+
+## #17 (HRESULT EXCEL_OPEN) design-weight
+
+### 現行 classification
+
+`src-tauri/src/project.rs:145` — `EXCEL_OPEN_SUBSTRINGS` 英語 5 件 (lowercase
+`contains` match)。`src-tauri/src/project.rs:532` に **Sprint 18 で pin された
+日本語ロケール negative-assertion test** (`is_excel_open_error_documents_known_japanese_locale_miss`)
+が残存 — follow-up #17 着地時に assertion を positive へ反転する約束付き。
+
+### ギャップ
+
+日本語 Windows の COM 例外は `"ファイル '...' は別のプロセスで使用されている
+ため..."` で 5 substring のどれにもマッチしない。結果: EXCEL_OPEN marker が
+付与されず、UI は generic error banner を表示、「Excel を閉じて再試行」
+ダイアログが発火しない。
+
+### PS 側 HRESULT 読み取り経路 (仕様レベル)
+
+PS `try { ... } catch { ... }` 内で `$_.Exception.HResult` が .NET exception の
+signed int を返す。COM 例外では `$_.Exception.InnerException.HResult` 参照が
+必要なケースあり。`Write-Error` / stderr に `VERDE_HRESULT=0x80070020` などの
+tag 行を emit する仕様が Rust 側 parser との contract を結ぶ。
+
+EXCEL_OPEN に対応する HRESULT (locale 非依存):
+- `0x80070020` `ERROR_SHARING_VIOLATION` — ファイル共有違反 (Excel 保持)
+- `0x80070021` `ERROR_LOCK_VIOLATION` — ロック領域アクセス
+
+他 kind:
+- `0x80070005` `E_ACCESSDENIED` → PermissionDenied
+- `0x80030002` `STG_E_FILENOTFOUND` → NotFound
+- `0x800A03EC` `XlNamedRange` Excel 固有 — 未分類 bucket
+
+### Rust 側 error kind マッピング案
+
+```rust
+pub(crate) enum ErrorKind {
+    ExcelOpen,          // 0x80070020, 0x80070021
+    PermissionDenied,   // 0x80070005
+    NotFound,           // 0x80030002
+    Unknown(i32),       // 未分類
+}
+fn parse_hresult_tag(stderr: &str) -> Option<i32> { ... }
+fn classify_hresult(hresult: i32) -> ErrorKind { ... }
+```
+
+両関数とも **完全 pure** — COM 呼び出しと切り離せるため macOS で full TDD 可能。
+
+### Approach 比較
+
+| 軸 | (a) HRESULT enum | (b) stderr substring (現行) | (c) exit code only |
+|----|------------------|----------------------------|--------------------|
+| locale-agnostic | ✅ | ❌ | ✅ |
+| 拡張性 | enum に 1 行追加 | locale 毎に無限追記 | ❌ 細分不可 |
+| PS 改変 | try/catch + tag emit 1 箇所 | 不要 | exit code 切り分け (広範改変) |
+| Rust 改変 | parse + enum + tests | なし | 粒度粗い |
+| macOS TDD | 完全 pure で full TDD | 既存通り | 限定的 |
+| pinned-negative test の扱い | positive へ自然反転 | 維持 | 反転不可 |
+
+**候補選定**: (a) HRESULT enum。Sprint 18 の pinned-negative test が自然な RED
+として機能し、Sprint 22 の env-var 経路と同様に pure helper で macOS TDD が成立。
+
+## Sprint 25 着手対象の確定
+
+### 比較マトリクス
+
+| 軸 | #16 lock staleness | #17 HRESULT EXCEL_OPEN |
+|----|---------------------|------------------------|
+| impact | PID reuse wedge (low freq; TTL 7d で待てば解ける) | 日本語 Excel の EXCEL_OPEN ダイアログ完全不発 (high freq, production UX 破損) |
+| effort | 中〜大 (3 OS 分岐 + dev-env fallback + pure helper 分離) | 小〜中 (PS try/catch + pure parser + enum) |
+| risk | 低 (現行 `is_pid_alive + TTL` がセーフティネット) | 低 (現行 substring match を fallback として併置可) |
+| testability (macOS) | 中 (pure helper は可; API 呼び出しは不可) | **高** (`parse_hresult_tag` + `classify_hresult` 完全 pure) |
+| user-visible value | 中 (crash 後 7d 待ちが数分で済む — 頻度低) | **高** (日本語 Excel でダイアログが初めて発火 — 毎 import) |
+| 既存 RED test の有無 | なし (新規起票要) | **あり** (Sprint 18 `is_excel_open_error_documents_known_japanese_locale_miss`) |
+| Sprint 22 型 Planning との整合性 | 3 OS fallback 設計は heavy (Planning 1 + 実装 1+ Sprint) | PS/Rust 契約 + enum — Sprint 22 env-var 規模 (Planning 1 + 実装 1) |
+
+### 判断: Sprint 25 は **#17 (HRESULT EXCEL_OPEN)** を着手
+
+**採択理由 (durable)**:
+
+1. **user-visible value の質が本質的に異なる**: #16 の PID wedge は Sprint 18
+   の TTL 7d fallback で「待てば解ける」問題になった。#17 は日本語ロケールで
+   「何度 import しても一度も正しいダイアログが出ない」 — 待っても解けない。
+   頻度 (毎 import) × 対象 (日本語ユーザー全員) × 持続性 (永続) の 3 軸で #17 が
+   優先。
+2. **Sprint 18 の pinned-negative test が自然な RED として機能**: Kent Beck の
+   「壊れたテストから始める」セオリーに最小摩擦で乗れる。
+   `is_excel_open_error_documents_known_japanese_locale_miss` の assertion 反転が
+   Sprint 25 Day 1 の RED になる — Sprint 18 の planner が今日のために仕込んだ
+   signal を履行する。
+3. **macOS で full pure-helper TDD が成立**: `parse_hresult_tag(stderr)` と
+   `classify_hresult(hresult)` は Windows COM と無関係な pure 関数。
+   Windows 実機なしで RED → GREEN → REFACTOR が回る。
+4. **Sprint 23 の成果が基盤として効く**: PS script 本体は既に static `const`。
+   try/catch + HRESULT emit の改変は `EXPORT_SCRIPT` / `IMPORT_SCRIPT` の各
+   1 箇所で完結。env-var 契約 (`$env:VERDE_*`) とも衝突しない。
+5. **design-weight が Sprint 22 型に収まる**: #16 は 3 OS × image-name API ×
+   dev-env fallback で Planning + 実装 Sprint の合計規模が #17 の 1.5〜2 倍。
+   #17 は Sprint 22 と同規模で 1 Planning + 1 実装 Sprint に収まる見込み。
+
+### #16 後回し理由 (durable)
+
+- **effort が相対的に大きい**: Windows `QueryFullProcessImageNameW` + Linux
+  procfs + macOS dev-env fallback + pure helper 分離。Sprint 22 型 Planning +
+  実装 Sprint の合計規模が #17 の約 2 倍。
+- **user-visible value が TTL で既に圧縮済み**: `lock.rs:18`
+  `LOCK_STALE_AFTER_HOURS = 24 * 7` (Sprint 18) が PID reuse wedge の
+  永続化を防いでいる。crashed Verde の lock は 7 日で reapable になる。
+  「絶対に解けない」問題ではない。
+- **再評価 trigger (durable)**:
+  - (i) production で PID reuse wedge の明示的報告が stakeholder から入った場合
+  - (ii) #17 完了後に本 Sprint の (a) OS native API 路線をベースに Sprint
+    25+N の Planning として取り上げ
+- **`sysinfo` 却下の durable 記録**: 将来の planner が #16 着手時に「楽な
+  選択肢」として `sysinfo` を引っ張り込むのを防ぐため、本 Sprint で
+  「1 箇所の needs に対して依存代償過大」と明記。本プロジェクトは既に
+  `windows` crate / `libc` を持ち、OS native FFI surface がゼロコストで使える。
+
+## Sprint 25 Sprint Goal 草案 (実装タスク粒度)
+
+**Goal**: PS 側 try/catch で HRESULT tag (`VERDE_HRESULT=0x...`) を stderr に
+emit し、Rust 側 pure parser が tag を抽出、`ErrorKind` enum +
+`classify_hresult` で locale 非依存に EXCEL_OPEN を分類。Sprint 18 の
+pinned-negative test を positive へ反転し、日本語 locale でも EXCEL_OPEN
+marker が付与される contract を pin する。
+
+### Tidy First 分離 (Sprint 23 と同形 3-commit)
+
+| 段階 | コミット種別 | 内容 |
+|------|-------------|------|
+| 1 | Tidy (構造のみ) | `parse_hresult_tag(stderr: &str) -> Option<i32>` を pure helper として切り出す。既存 classifier は substring 経路のまま。+3 unit tests (hex / decimal / none)。挙動不変。 |
+| 2 | Tidy (構造のみ) | `classify_hresult(hresult: i32) -> ErrorKind` を追加。`EXCEL_OPEN_HRESULTS: &[i32] = &[0x80070020u32 as i32, 0x80070021u32 as i32]`。+4 unit tests。挙動は未接続 (pure tests only)。 |
+| 3 | RED | Sprint 18 `is_excel_open_error_documents_known_japanese_locale_miss` の assertion を positive へ反転。HRESULT 経路が未接続なので RED 確定 (1 failed)。 |
+| 4 | GREEN (挙動変更) | `EXPORT_SCRIPT` / `IMPORT_SCRIPT` に `try { ... } catch { $h = $_.Exception.HResult; [Console]::Error.WriteLine("VERDE_HRESULT=0x{0:X8}" -f $h) }` 追加。Rust `classify_import_error` が `parse_hresult_tag` → `classify_hresult` 経路を通り、`ExcelOpen` の場合は EXCEL_OPEN marker を付与。substring fallback は HRESULT 無しケース (非 Windows テスト環境) のため併置。 |
+| 5 | Tidy (後) | substring fallback の存廃判断。HRESULT 経路が非 Windows でも cover される証拠 (例: Linux CI で stub 経由の HRESULT injection テスト) が揃ったら substring 削除。未検証なら維持。 |
+| 6 | docs | Sprint 25 retrospective + preamble "Currently detailed" を `22 / 23 / 24` → `23 / 24 / 25` 更新 + Sprint 22 を index へ demote。 |
+
+### PS / stderr 契約 (draft)
+
+| tag | 形式 | 例 |
+|-----|------|-----|
+| `VERDE_HRESULT` | `VERDE_HRESULT=0x{:08X}` | `VERDE_HRESULT=0x80070020` |
+| `VERDE_HRESULT_MSG` (optional) | `VERDE_HRESULT_MSG=<trim>` | `VERDE_HRESULT_MSG=ファイル ...` |
+
+parser は行単位で `VERDE_HRESULT=` prefix のみ抽出。未知 stderr は透過。
+既存 substring matcher は tag 未検出時の fallback として働く。
+
+### Test 予算 (予測)
+
+- `parse_hresult_tag` pure tests: +3 (hex / decimal / none)
+- `classify_hresult` pure tests: +4 (ExcelOpen x2, PermissionDenied, Unknown)
+- pinned-negative flip: ±0 (既存 1 件の assertion 反転のみ)
+- PS integration: 変化なし (Windows 実機のみで検証)
+- 予測 delta: **+7 (48 → 55 Rust tests)**。Sprint 23 の `-9 → 48` からの再増加。
+
+### Sprint 25 受け入れ基準 (予測)
+
+- `cargo test --lib` 55 green (予測)
+- `cargo clippy --lib -- -D warnings` クリーン
+- `bun run test` 63/63 緑 (frontend 無変更)
+- 日本語 pinned-negative test が positive 反転して green
+- `rg 'VERDE_HRESULT=' src-tauri/` → PS 2 箇所 + Rust parser 1 箇所
+
+## Housekeeping — Sprint 17–19 index demotion
+
+本 Sprint で Sprint 17 / 18 / 19 の詳細 section を「Sprint 3–20 summary index」の
+1 行 row へ折り畳み、plan-bloat rule ("3 most recent detailed") への
+pre-existing drift を閉じた。保全された情報:
+
+- **follow-up #15 (PS injection) の歴史**: Sprint 23 section に全詳細 (完了)。
+- **follow-up #16 / #17**: 本 Sprint 24 で design-weight 評価を記録。
+- **#12 / #13 (ConflictDialog wiring)**: backlog table に存続 (gate: backend
+  error-kind)。
+- **Intentional Pause 終了記録**: 別 section として保持 (durable signal — 将来の
+  Pause 設計時に参照)。
+- **Sprint 18 Key decisions** (denylist vs allowlist の理由、TTL 7d 根拠、
+  pinned-negative 理由、validator 配置理由、Win32_System_Threading bundling 理由):
+  commit message (`7c00520`, `084ee38`, `c875c58`) に保全。Sprint 24 以降で
+  同根拠が再登場する場合は `git show` 参照。
+- **Sprint 19 hook extraction 4 件 (C1–C4)** の詳細設計: commit message
+  (`072b44b`, `352d74c`, `702e7fa`, `19d7d5a`) に保全。C5 defer → Sprint 20 で
+  解消した流れは index row に記録済み。
+
+## 受け入れ基準 (本 Sprint 24)
+
+- `bun run test` **63/63** 緑 (コード変更なし)
+- `bun run tsc --noEmit` クリーン
+- `cargo test --lib` 未実行 (docs-only、backend 無変更; Sprint 23 baseline 48
+  green を継続想定)
+- plan.md に Sprint 24 Planning section 追加 (#16 / #17 design-weight 比較 +
+  Sprint 25 着手判断 + 不採用理由の durable 記録)
+- Sprint 17 / 18 / 19 の詳細 section が index row (3 行) に折り畳まれている
+- preamble "Currently detailed" が `22 / 23 / 24` に更新
+- Index table 見出しが "Sprint 3–20 summary index" に更新
+
+## 変更コミット
+
+| Commit | 内容 |
+|--------|------|
+| (docs) | このセクション + Sprint 17–19 index demotion + preamble 更新 + Commit discipline notes 新設 |
+
+## Key decisions
+
+- **Sprint 25 着手対象を #17 に確定するのは「user-visible value × TDD 摩擦
+  最小 × Sprint 23 基盤活用」の積が決定打**: 影響頻度 (日本語 Excel ユーザーは
+  毎 import) × RED が既に書かれている状態 × pure helper で macOS TDD が成立 ×
+  PS 本体が static const なので emit 追加が 2 箇所で完結、の 4 点が揃う。
+  #16 は 4 点のうち RED 未存在 + 3 OS 分岐で design surface が広い。
+- **#16 を「後回し」ではなく「再評価 trigger 付きで保留」に格上げ**: Sprint 25
+  完了時 (trigger ii) と production 報告 (trigger i) を durable に記録する
+  ことで、曖昧な "TODO" ではなく「design-weight 評価済みだが優先度で後ろ」
+  という確定ステータスに格上げ。planner が後で迷わない。
+- **`sysinfo` crate を事前に却下**: 依存追加は「将来の planner が思いつく
+  最短経路」の一つ。本 Sprint で「1 箇所の needs に対して過大」と durable に
+  記録することで、Sprint 25+N の #16 着手時に planner が楽をして sysinfo を
+  引っ張り込むのを防ぐ。
+- **substring fallback の存廃は Sprint 25 終盤判断に**: #17 GREEN 時点で
+  substring を即削除すると Windows 実機なしテスト (CI / macOS dev) の
+  classification カバレッジが急減する。HRESULT 経路が確実に動く証拠が揃って
+  から削除判断する方針。Sprint 23 の `validate_ps_arg` 削除は「env-var 経路が
+  構造的排除」という強保証があったため即削除できた; substring はそれと同じ
+  保証レベルがまだない。
+- **docs-only Sprint を単独で切る価値**: Sprint 22 の先例通り、implementation
+  Sprint に Planning を同梱すると (a) design judgement を急ぐ (b) 実装中に
+  alternative が見えた時の sunk-cost bias が乗る。Sprint 24 で design を
+  coolly 確定 → Sprint 25 で implementation に集中する分離は Sprint 22 → 23
+  で実証済みの pattern。
+- **housekeeping を Planning Sprint に束ねる判断**: Sprint 17–19 demotion は
+  単体で Sprint を切るほどの重みがなく、かつ本 Sprint の docs commit に
+  自然に束ねられる。「index demotion を忘れる」リスクを 1 commit 分の増分で
+  閉じた。
+
+## Follow-ups
+
+- **Sprint 25**: 上記 Sprint Goal 草案に従い #17 を TDD で実装
+  (Tidy → Tidy → RED → GREEN → Tidy → docs の 5〜6 commit)。
+- **Sprint 25+N**: #17 完了後、#16 design-weight を再評価。本 Sprint の
+  (a) OS native API 路線 + macOS cfg-gate fallback をベースに Planning を書く。
+- **rule-of-three 監視**: 新規 duplicate 未観測。Sprint 25 で PS
+  error-handling を触るため、`try/catch` パターンが複数箇所に現れる可能性
+  あり。重複発生時は即 Tidy First に切り替え。
+- **preamble "Currently detailed" drift 再発防止**: Sprint 25 追加時に
+  `22 / 23 / 24` → `23 / 24 / 25` 更新 + Sprint 22 index demotion を同
+  コミットで行うこと (本 Sprint で示した手順の踏襲)。
+
+# Commit discipline notes
+
+Sprint retrospective の Try 項目のうち、**standing convention** に格上げされた
+commit-time ルールを durable 化するセクション。Sprint を跨いで同じ try が
+再登場した / 明示的に決定されたルールのみをここに記録する。Sprint 内限定の
+process-level 改善 (例: test 数予測の精度) は各 Sprint の retrospective に留める。
+
+## HEREDOC escape for `$` in commit messages (Sprint 23 Try → standard)
+
+**問題**: Sprint 23 (`9cc2c12`) で subject line に `\$env` が混入
+(`fix(vba-bridge): pass args via \$env:VERDE_* instead of format! body`)。
+pre-commit hook 失敗時に amend 禁止ルールが優先するため修正できず、履歴に
+残留。
+
+**ルール**: commit message の **subject line に literal `$` を含む場合**、
+HEREDOC 経由ではなく外 single-quote の単一行形式を使う:
+
+```bash
+git commit -m 'fix(vba-bridge): pass args via $env:VERDE_* instead of format! body'
+```
+
+body 部分は HEREDOC のままで可 (`<<'EOF'` single-quoted なら `$` は透過)。
+ただし subject だけは single-quote 優先 — paste / shell history 経由で `\$`
+が意図せず混入する経路を断つため。
+
+**適用範囲**: 本プロジェクト全体。Claude Code および human author 両方。
+違反を検知したら (HEREDOC 経由 subject に `$` を含む commit が作られた場合)、
+`git commit --amend` は **使わず** (既存 amend 禁止ルール優先)、次 commit で
+正しい形式を使うこと。過去の subject は履歴として保存。
 
