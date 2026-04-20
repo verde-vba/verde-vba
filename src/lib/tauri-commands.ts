@@ -11,6 +11,12 @@ export async function forceOpenProject(
   return invoke<ProjectInfo>("force_open_project", { xlsmPath });
 }
 
+export async function openProjectReadOnly(
+  xlsmPath: string
+): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>("open_project_readonly", { xlsmPath });
+}
+
 export async function closeProject(xlsmPath: string): Promise<void> {
   return invoke("close_project", { xlsmPath });
 }
