@@ -7,8 +7,6 @@ pub struct VbaBridge;
 
 impl VbaBridge {
     /// PowerShell COM 経由で VBA コードをエクスポート
-    // TODO: plumb into sync_from_excel once COM export is wired (PLANS §9, §814)
-    #[allow(dead_code)]
     #[cfg(windows)]
     pub async fn export(
         xlsm_path: &str,
@@ -112,8 +110,6 @@ try {{
         Ok(())
     }
 
-    // TODO: plumb into sync_from_excel once COM export is wired (PLANS §9, §814)
-    #[allow(dead_code)]
     #[cfg(not(windows))]
     pub async fn export(
         _xlsm_path: &str,
