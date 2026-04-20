@@ -9,12 +9,12 @@ All earlier sprints collapse to one-line rows in the index table below —
 commit-level detail. Compression-only sprints (like Sprint 16 itself) do
 not consume a detail slot, and probe-only refinement sprints occupy one
 slot at whatever density their outcome requires (often < 50 lines).
-Currently detailed: Sprint 22 / 23 / 24. A planner adding a new sprint
+Currently detailed: Sprint 23 / 24 / 25. A planner adding a new sprint
 section must demote the now-oldest detailed sprint into the index row in
 the same commit. Sprint 17–19 were folded into index rows during Sprint
 24 housekeeping (closing a pre-existing detail-drift).
 
-## Sprint 3–20 summary index
+## Sprint 3–22 summary index
 
 | Sprint | 主題                                                                            | 主要コミット                                                                    |
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -36,6 +36,7 @@ the same commit. Sprint 17–19 were folded into index rows during Sprint
 | 19     | App.tsx 責務分割 (352→229 LOC; behavioral change ゼロ)                          | `072b44b` C1 `useErrorRouting` (+7 tests); `352d74c` C2 `useModuleTabs` (+7, stale-closure fix); `702e7fa` C3 `useOpenFile` (+9); `19d7d5a` C4 `useSave` (+7). C5 `ReadOnlyBar` deferred (landed in Sprint 20). Frontend 32 → 62 tests; cargo 55 unchanged. |
 | 20     | C5 `ReadOnlyBar` component extraction + `vi.fn` widening-cast tidy              | `48074d9` RED test; `afa0e27` GREEN extraction; `d4a27e1` wire-up + `useSave.test` widening-cast removal; docs `b3b0b24`. App.tsx LOC 229 → 215; bypass arc still at zero `!\.` hits; `vi.fn<>()` rule-of-three queued (resolved in S21). |
 | 21     | `vi.fn()` cast Tidy First (rule-of-three 到達, 3 hits across 2 files)            | `03a603a` replace `vi.fn() as (Fn)` with typed `vi.fn<(Fn)>()`. Frontend 63/63 tests unchanged; `rg 'vi\.fn\(\) as \(' src/` → 0. Key decision: generic form is vitest's idiomatic pattern (safer than unsafe downward cast). #15 design-weight deferred to Sprint 22 Planning (macOS TDD 不適合認定 → Sprint 22 で env-var 経路確定 → Sprint 23 で実装完了)。 |
+| 22     | `#15` PS 引数渡しアーキテクチャ設計 (Planning-only, docs commit)                 | `f3dbd32` 設計記録: Approach 1 (env-var 経由) を採択。Approach 2 (`-File` + 一時ファイル) は `tempfile` crate 追加 + クラッシュ残留リスクでコスト過大、Approach 3 (escape 強化) は injection 根絶せず却下。Rust `Command::env("VERDE_*", ...)` / PS `$env:VERDE_*` / `VERDE_` prefix policy を確定。実装は Sprint 23 で履行 (`9cc2c12`)。 |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
 
@@ -62,8 +63,8 @@ source and the external gate blocking execution.
 | 13  | Alias of #12 (explicit registration during Sprint 18 security sweep)| S18         | Same as #12 — kept as a separate id only for planner cross-reference |
 | 14  | (reserved — placeholder retired by Sprint 18 bundling decision)    | S18         | n/a                                               |
 | 15  | Migrate `vba_bridge` to `-ArgumentList` / `param(...)`             | S18         | Re-architecture PBI (script body must not concatenate caller data) |
-| 16  | Image-name-based lock staleness (Windows + Linux)                  | S18         | Windows COM/Win32 + Linux procfs expertise on hand |
-| 17  | HRESULT-based EXCEL_OPEN classification (locale-agnostic)          | S18         | COM error-code extraction pathway (blocked on `vba_bridge` rewrite in #15) |
+| 16  | Image-name-based lock staleness (Windows + Linux)                  | S18         | (i) production PID-reuse wedge report, or (ii) voluntary re-eval after Sprint 25 (see Sprint 24 design-weight matrix) |
+| 17  | ~~HRESULT-based EXCEL_OPEN classification~~ — **CLOSED in Sprint 25** (`6578c40`) | S18 | locale-agnostic path live via `VERDE_HRESULT=0x...` stderr tag; JP-locale dialog now fires |
 
 ## Intentional Pause — 終了記録 (exited 2026-04-21 by Sprint 18)
 
@@ -93,189 +94,6 @@ PBI 投入）により解除され、Sprint 18 として security 4 件に着地
 - **Pause が有効だったのは期間が短かったから**ではなく、「silent probe
   を禁じる」ルールを明示していたから。次に Pause に入る場合もこの
   構造を維持すること（期間は成り行き、条件は厳格）。
-
-# Sprint 22 (2026-04-21) — #15 Planning: PS 引数渡しアーキテクチャ設計
-
-## Goal
-
-#15 実装の設計判断を確定し、次 Sprint で直接着手できる Planning ドキュメントを
-残す。コード変更なし。docs commit 1 本で完了。
-
-## Probes executed (Sprint start)
-
-1. `rg '!\.' src/` → 0 hits
-2. `rg 'as\s+[A-Z]' src/ --type ts` → test 1件 (error-parse.test.ts:133、ガード付き正当 assertion、保持)
-3. `rg '@ts-ignore|@ts-expect-error' src/` → 0 hits
-4. `rg '\bany\b' src/ --type ts` → `expect.any(Error)` とコメントのみ
-5. rule-of-three:
-   - `useTranslation`: 全コンポーネントで標準使用、抽出不要
-   - `role=`: dialog×3 / status×1 / alert×1 — 異種 ARIA role、統一不要
-   - `useSave handleSave` null-guard: 1箇所のみ、rule-of-two 未満
-
-## Priority selection
-
-- A: arc 維持 → skip
-- B: #15 Planning 実行 ← **採用**
-- C: rule-of-three 未到達 → 監視メモ追記のみ
-
-## #15 アプローチ比較
-
-### 現状 (Approach 0 — baseline)
-
-```rust
-let script = format!(r#" ... $excel.Workbooks.Open("{xlsm_path}") ... "#);
-Command::new("powershell").args(["-Command", &script])
-```
-
-ユーザー入力 (`xlsm_path`, `output_dir`, `module_name`, `module_path`) が
-PowerShell コード文字列に `format!` で埋め込まれる。
-`validate_ps_arg` が `"`, `` ` ``, `$`, `;` 等を拒否することで injection を緩和。
-
-**根本問題**: 注入を「緩和」しているが「根絶」していない。
-Unicode パス (日本語ファイル名) が `validate_ps_arg` に弾かれる既知の制限あり。
-
----
-
-### Approach 1 — 環境変数経由 【推奨】
-
-```rust
-const EXPORT_SCRIPT: &str = r#"
-$xlsmPath  = $env:VERDE_XLSM_PATH
-$outputDir = $env:VERDE_OUTPUT_DIR
-$excel = New-Object -ComObject Excel.Application
-...
-$wb = $excel.Workbooks.Open($xlsmPath)
-...
-$filepath = Join-Path $outputDir $filename
-"#;
-
-Command::new("powershell")
-    .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", EXPORT_SCRIPT])
-    .env("VERDE_XLSM_PATH", xlsm_path)
-    .env("VERDE_OUTPUT_DIR", output_dir)
-    .output()?
-```
-
-**仕組み**: Rust が OS の env var チャネル経由で値を渡す。
-PS スクリプト本体は完全な静的定数。ユーザー入力がコードとして解釈される経路がゼロ。
-
-**利点**:
-- injection surface ゼロ（緩和ではなく構造的排除）
-- Unicode パス対応 (`validate_ps_arg` が除去されるため日本語ファイル名が通る)
-- `validate_ps_arg` 関数と 8件のユニットテストを削除 → コード削減
-- 一時ファイル不要、依存追加なし
-
-**欠点**:
-- 環境変数は子プロセスに継承される（ただし PS が唯一の直接子プロセス）
-- Windows 環境変数の最大長 32767 chars/var — 通常のパスは問題なし
-
-**TDD on macOS で書けるテスト**:
-- `validate_ps_arg` 8件 → **削除**
-- injection テスト 2件 (`export_rejects_injected_...`, `import_rejects_injected_...`) → **削除** (injection が構造的に不可能になるため)
-- 非 Windows 正常テスト 2件 → **維持** (returns "requires Windows")
-- 新規: 空文字列の early-fail 挙動は PS に任せる (COM エラーとして伝播)
-- Windows 実行テスト: macOS から書けない (変わらず)
-
-**テスト収支**: -10件 (削除) ± 0 (追加なし) ＝ 合計 55 - 10 = 45 Rust tests
-
----
-
-### Approach 2 — `-File` + 一時スクリプトファイル
-
-```rust
-let tmp = tempfile::NamedTempFile::new()?;
-write!(tmp, "{}", EXPORT_SCRIPT)?;
-Command::new("powershell")
-    .args(["-NoProfile", "-ExecutionPolicy", "Bypass",
-           "-File", tmp.path().to_str().unwrap(),
-           "-XlsmPath", xlsm_path, "-OutputDir", output_dir])
-    .output()?
-```
-
-PS スクリプトに `param([string]$XlsmPath, [string]$OutputDir)` を追加し、
-`-File` でファイル名指定呼び出し。`-File` は named param binding を確実に行う。
-
-**欠点**:
-- `tempfile` crate 追加が必要 (または `std::env::temp_dir()` 手書き管理)
-- クラッシュ時に一時ファイルが残留するリスク
-- ファイル作成/削除のエラーハンドリング +30行
-
-**判断**: Approach 1 と injection 排除効果は同等だがコスト大。採用しない。
-
----
-
-### Approach 3 — 現状維持 + escape 強化
-
-`validate_ps_arg` の許可文字を拡張、または PS エスケープ (`` ` `` で `"` を無害化)。
-
-**欠点**:
-- injection surface を「縮小」するだけで根絶しない
-- Unicode パス問題が残存
-- エスケープロジックのバグが直接 RCE につながる
-
-**判断**: セキュリティ改善の方向性として不適切。採用しない。
-
-## 採択: Approach 1 (環境変数経由)
-
-| 比較軸 | Approach 1 | Approach 2 | Approach 3 |
-|--------|-----------|-----------|-----------|
-| injection 根絶 | ✅ | ✅ | ❌ |
-| Unicode パス | ✅ | ✅ | ❌ |
-| コード増減 | ▼ 削減 | ▲ 増加 | ≈ 同等 |
-| 一時ファイル | なし | あり | なし |
-| macOS TDD | テスト減 | テスト増 | テスト維持 |
-
-## 次 Sprint (Sprint 23) 実装計画
-
-### Tidy First 原則: 構造変更と挙動変更を分離
-
-**Commit 1 — 構造変更 (no behavior change)**
-- `EXPORT_SCRIPT` / `IMPORT_SCRIPT` を static `const` に昇格
-- スクリプト本体を `format!` から切り出す (変数参照形式はまだ `{xlsm_path}`)
-- テスト: 変化なし、55 Rust tests green
-
-**Commit 2 — 挙動変更 RED: 空文字 early-fail の新テスト (optional)**
-- 現行: `validate_ps_arg` が "must not be empty" を返す
-- 新仕様: 空文字は `export`/`import` 先頭で `Err("xlsm_path must not be empty")` を返す
-- macOS で書けるテストとして残す場合は RED → GREEN
-
-**Commit 3 — 挙動変更 GREEN: env-var 移行 + validate_ps_arg 削除**
-- `format!` を静的スクリプト文字列に置換
-- `$env:VERDE_*` 参照に書き換え
-- `.env("VERDE_XLSM_PATH", xlsm_path)` 等を Command に追加
-- `validate_ps_arg` 関数と injection テスト群を削除
-- `cargo test --lib`: 45 passed (expected -10 from deleted validator tests)
-
-### 環境変数名ポリシー
-
-| PS 変数参照 | Rust env key | 用途 |
-|------------|-------------|------|
-| `$env:VERDE_XLSM_PATH` | `VERDE_XLSM_PATH` | export / import |
-| `$env:VERDE_OUTPUT_DIR` | `VERDE_OUTPUT_DIR` | export のみ |
-| `$env:VERDE_SOURCE_DIR` | `VERDE_SOURCE_DIR` | import のみ |
-| `$env:VERDE_MODULE_NAME` | `VERDE_MODULE_NAME` | import のみ |
-| `$env:VERDE_MODULE_PATH` | `VERDE_MODULE_PATH` | import のみ |
-
-`VERDE_` prefix で他プロセスの env vars との衝突を回避。
-
-## 変更コミット (今 Sprint)
-
-| Commit  | 内容 |
-| ------- | ---- |
-| (docs)  | このセクション (Planning memo + Sprint 22 retrospective) |
-
-## 受け入れ基準 (今 Sprint)
-
-- `bun run test` 63/63 緑 (変化なし)
-- `bun run tsc --noEmit` クリーン
-- plan.md に #15 設計判断が記録されている
-
-## Follow-ups
-
-- Sprint 23: Approach 1 (env-var) を上記実装計画に従い TDD で実装。
-- #16 (lock staleness) / #17 (HRESULT EXCEL_OPEN): 依然 blocked / heavy。
-  #15 完了後に改めて design-weight を評価。
-- rule-of-three: 次の監視対象なし。新規コンポーネント / hook 追加時に再評価。
 
 # Sprint 23 (2026-04-21) — #15 実装: PS 引数 env-var 経由への移行
 
@@ -746,6 +564,201 @@ pre-existing drift を閉じた。保全された情報:
 - **preamble "Currently detailed" drift 再発防止**: Sprint 25 追加時に
   `22 / 23 / 24` → `23 / 24 / 25` 更新 + Sprint 22 index demotion を同
   コミットで行うこと (本 Sprint で示した手順の踏襲)。
+
+# Sprint 25 (2026-04-21) — #17 実装: HRESULT EXCEL_OPEN 分類
+
+## Goal
+
+Sprint 24 Planning の判断に従い、日本語ロケール Excel の COM 例外で
+EXCEL_OPEN ダイアログが永久に発火しない問題を解決する。PS `try/catch` で
+`$_.Exception.HResult` を `VERDE_HRESULT=0x{0:X8}` タグとして stderr に
+emit し、Rust 側 pure parser + `ErrorKind` enum + `classify_hresult` が
+タグを抽出して locale 非依存に分類する。Sprint 18 で pin した
+negative-assertion を positive へ反転して契約を履行。
+
+## Tidy First 分離
+
+| 段階 | コミット | 種別 | 内容 |
+|------|----------|------|------|
+| 1 | `d6c2d88` | Tidy (構造のみ) | `parse_hresult_tag(stderr: &str) -> Option<i32>` を pure helper として追加 (hex / decimal / none の 3 tests)。`#[allow(dead_code)]` で一時的 dead にする — 挙動不変、48 → 51 Rust tests。 |
+| 2 | `32be5c3` | Tidy (構造のみ) | `ErrorKind` enum (`ExcelOpen / PermissionDenied / NotFound / Unknown(i32)`) + `EXCEL_OPEN_HRESULTS` const + `classify_hresult` を追加 (4 tests)。こちらも未配線、挙動不変、51 → 55 Rust tests。 |
+| 3 | `799f77e` | RED | Sprint 18 `is_excel_open_error_documents_known_japanese_locale_miss` を positive 方向に flip + `VERDE_HRESULT=0x80070020` を含む JP fixture に更新。substring 経路のみで HRESULT 未配線のため 1 failed 確定。 |
+| 4 | `6578c40` | GREEN (挙動変更) | `is_excel_open_error` の先頭で `parse_hresult_tag` → `classify_hresult` を走らせ、`ErrorKind::ExcelOpen` なら true を返す経路を追加 (substring fallback は後続に残置)。PS scripts に `HRESULT_CATCH` 定数を注入し `concat!` で `EXPORT_SCRIPT` / `IMPORT_SCRIPT` を合成。catch は `Exception.InnerException.HResult` 優先 → `Exception.HResult` fallback → `throw` で rethrow (exit code は保存)。`#[allow(dead_code)]` 解除。RED test が GREEN に反転、55 passed。 |
+| 5 | `8b86c72` | Tidy (後) | substring fallback 存廃判断。decision: **残す** — PS プロセスが try block 到達前に死ぬケース (process spawn 失敗 etc) ではタグが emit されない。2 pins を追加: (i) 非 EXCEL_OPEN HRESULT タグ (`E_ACCESSDENIED`) を拾わない、(ii) タグ無し英語 stderr は fallback で classify される。55 → 57 Rust tests。 |
+| 6 | (docs) | docs | 本セクション + preamble 更新 + Sprint 22 index demotion + backlog #17 close。 |
+
+## 実装の要点
+
+### PS 側 `HRESULT_CATCH` (共有定数)
+
+```powershell
+} catch {
+    $h = 0
+    if ($_.Exception) {
+        if ($_.Exception.InnerException -and $_.Exception.InnerException.HResult) {
+            $h = $_.Exception.InnerException.HResult
+        } elseif ($_.Exception.HResult) {
+            $h = $_.Exception.HResult
+        }
+    }
+    [Console]::Error.WriteLine(("VERDE_HRESULT=0x{0:X8}" -f $h))
+    throw
+```
+
+`EXPORT_SCRIPT` / `IMPORT_SCRIPT` は Rust `concat!` macro で
+`[body, HRESULT_CATCH, "} finally { ... }"]` を連結。`concat!` は stdlib
+macro なので追加依存ゼロ (Sprint 22 Planning で検討した `tempfile` 追加案と
+対照的)。`InnerException.HResult` 優先は `TargetInvocationException`
+wrapping パターン (`.NET` が COM 例外を包む典型) をカバーするため。
+
+### Rust 側 wiring
+
+```rust
+pub(crate) fn is_excel_open_error(err_msg: &str) -> bool {
+    if let Some(hresult) = Self::parse_hresult_tag(err_msg) {
+        if Self::classify_hresult(hresult) == ErrorKind::ExcelOpen {
+            return true;
+        }
+    }
+    // substring fallback は後続に残置 (Sprint 25 Tidy-after judgment)
+    ...
+}
+```
+
+HRESULT 経路を先に走らせ、非 EXCEL_OPEN HRESULT は fallback に落ちる。
+`E_ACCESSDENIED` (0x80070005) は `PermissionDenied` に分類される =
+ExcelOpen にはならない = fallthrough する = substring 非マッチで false。
+commit 5 の 1 つ目の pin がこの invariant を固定。
+
+## 受け入れ基準 (達成)
+
+- `cargo test --lib` **57 passed** (Sprint 24 予測 55 に対し +2; Tidy-after の pin 2 件ぶん上振れ)
+- `cargo clippy --lib -- -D warnings` クリーン
+- `bun run test` **63/63** 緑 (frontend 無変更)
+- `bun run tsc --noEmit` クリーン
+- `rg 'VERDE_HRESULT=' src-tauri/` → PS `HRESULT_CATCH` 1 箇所 (export/import で共有) + Rust parser / tests で参照
+- Sprint 18 pinned-negative test が positive 方向 GREEN
+- plan.md preamble `Currently detailed: 23 / 24 / 25`、Sprint 22 index demotion 完了、backlog #17 クローズ
+
+## Planning 予測との差分
+
+- Sprint 24 予測 `+7 → 55 tests`。実測 `+9 → 57 tests`。差分は commit 5
+  (Tidy-after) で pin した 2 件の intentional 追加。Sprint 24 Sprint Goal 草案
+  で "substring fallback 存廃判断" とのみ書かれていた commit を、pure
+  structural judgment (残置) + test pin 2 件へ具体化した結果。overrun ではなく
+  judgement が structural test に落ちた形。
+- Sprint 24 Sprint Goal 草案では commit 1 が `parse_hresult_tag`、commit 2 が
+  `classify_hresult + ErrorKind` の順だった。履行通り。user プロンプトの
+  paraphrase 順 (PS catch → enum) ではなく Sprint 24 Sprint Goal 草案順
+  (pure helpers first) を優先した — PS 編集は stderr 内容を変えるため
+  「構造のみ」の約束を崩す判断。
+- `HRESULT_CATCH` を PS script 2 箇所で重複させず、`concat!` で共有する
+  判断は草案になかった局所判断。`const_format` crate 検討 → stdlib `concat!`
+  で十分と確認 → 採用。
+
+## Key decisions
+
+- **HRESULT 先・substring 後**: 経路優先順位を固定。`is_excel_open_error` の
+  先頭で HRESULT 経路を走らせ、タグが無い or 非 EXCEL_OPEN HRESULT の場合に
+  limited に substring fallback。逆順 (substring → HRESULT) にすると英語
+  locale で false positive を拾ったときに HRESULT に訂正する経路が無い。
+- **substring fallback を即削除しない**: Sprint 23 の `validate_ps_arg`
+  削除は「env-var が構造的排除」という強保証があったため即削除可能だった。
+  substring は HRESULT 経路が「PS catch が必ず実行される」保証の上で同じ
+  強保証に到達するが、catch に入る前の process 失敗 (spawn error, PS startup
+  失敗 etc) はタグを emit しない。Windows 実機 CI が無い今、「タグ無し経路でも
+  分類できる」保険を残す判断。commit 5 の 2 つ目の pin がこの invariant を固定。
+- **`concat!` macro で PS scripts を合成**: Sprint 23 で `format!` → `const`
+  昇格時に `str::replace` 経路を導入したが、今回は placeholder substitution
+  不要 (HRESULT_CATCH は 2 script で完全同一)。stdlib macro で依存追加ゼロ、
+  Sprint 22 で却下した `tempfile` / Sprint 25 で検討した `const_format` と
+  並んで「外部 crate を避ける」原則を履行。
+- **`InnerException.HResult` 優先**: `.NET` は COM exception を
+  `TargetInvocationException` で wrap することが多く、`$_.Exception.HResult` は
+  wrap の HResult (典型: `0x80131604` `TargetInvocationException`) を返す。
+  wrapped の内側に本物の COM HResult (`0x80070020` etc) が入っている。
+  macOS 環境では Windows 実機を持たないため InnerException 優先ルールを
+  durable 記録として Key decisions に置く。
+- **`ErrorKind` enum 3 variants (PermissionDenied / NotFound / Unknown) は
+  dead_code allow**: 分類自体は `classify_hresult` の pure tests で履行済み
+  だが、UI branches が存在しない = 本番 production code で使われていない。
+  `#[allow(dead_code)]` with comment を enum の内部 variant 単位で付けた
+  (enum 全体の allow ではなく)。これで `ExcelOpen` variant が production で
+  使われていることが dead_code 検知の観点から見える。将来 UI が branches を
+  増やすときに allow を 1 件ずつ外す。
+
+## KPT
+
+### Keep
+- **Tidy First を pure helper 先行で 2 commit に分割**: `parse_hresult_tag`
+  と `classify_hresult + ErrorKind` を別 commit に分けた。Sprint 23 で
+  `cf84fd8` (RED) / `9cc2c12` (GREEN) を明確に分離したのと同じ pattern を
+  踏襲。helper の pure tests が先行することで、後続の GREEN で「配線だけ」に
+  集中できた。
+- **user プロンプトではなく Sprint 24 Sprint Goal 草案を優先**: user message
+  は plan.md の paraphrase で commit 順 (PS catch 先) が逆だったが、「PS 編集
+  は stderr 内容を変えるため Tidy First の『構造のみ』を破る」という理由で
+  plan.md を優先。durable な planning doc が conversation-level な指示より
+  上位、という Sprint 24 で確立した判断を履行。
+- **Tidy-after で structural judgment を test pin に落とした**: Sprint 24
+  Sprint Goal 草案の commit 5 "substring fallback の存廃判断" は曖昧な
+  "judgment" commit になりそうだったが、`test(project): pin HRESULT path +
+  substring fallback coexistence` という明確な structural commit に実現。
+  "残す理由" が test の存在で可視化される。
+
+### Problem
+- **`#[allow(dead_code)]` の出入りが 2 commit に分散**: commit 1 で追加、
+  commit 4 で削除したが、commit 2 でも新規追加 (enum + const) した。
+  `ErrorKind` の内部 variants は結局 commit 4 でも残す形になった (UI branches
+  が無いため)。当初「commit 4 で全部外せる」想定が実態と一致しなかった。
+  Tidy First の commit 境界で `#[allow(dead_code)]` が行き来するのは
+  小さい noise。
+- **`concat!` への切替は local 判断で Planning になかった**: Sprint 24
+  Sprint Goal 草案では PS scripts の edit 方法が未定義だった。`HRESULT_CATCH`
+  共有は Sprint 25 実装中の局所判断。Planning 段階で PS script
+  synthesis 方式を 1 行 pin しておけば commit 4 の implementation surface が
+  小さくなっていた。Sprint 26+N Planning で PS-side changes を扱う場合に
+  「合成方式 (concat! / str::replace / separate scripts) の事前判断」を checklist に。
+- **日本語 locale の実機確認が未実施**: Sprint 24 design-weight で
+  「macOS で full pure-helper TDD 成立」と記録したが、それは backed
+  contract (parse + classify) の話。最終 `$_.Exception.HResult` が日本語
+  Windows で実際に期待値 (`0x80070020`) を返すかは未検証。stakeholder 環境か
+  Windows CI が整備されてから verify するしかない。Sprint 25 完了と
+  production 検証を切り離す必要。
+
+### Try
+- **PS script synthesis 方式を Planning table で pin**: PS scripts を
+  編集する Sprint の Planning で「edit 方式 (inline concat / replace /
+  separate file)」を table の 1 行に記録する。Sprint 25 の `concat!` 判断は
+  十分適切だったが、後続 planner が同じ局面で迷わないように pattern を
+  durable 化。
+- **`#[allow(dead_code)]` の出入りを commit boundary で意識的に管理**:
+  Tidy First で追加→GREEN で削除、が理想。enum variants など部分的に残る
+  ケースは variant 単位で allow を付ける (全体 allow ではなく) 慣習を継続。
+- **Windows 実機 verification を Sprint 25+N の明示タスクに**: production
+  deploy / stakeholder テスト環境で (i) 日本語 Excel で import 失敗時に
+  `VERDE_HRESULT=0x80070020` が stderr に出るか、(ii) UI が EXCEL_OPEN
+  ダイアログを出すか、を verify。出来なければ `InnerException.HResult`
+  優先ロジックの調整が必要。Sprint 25 単体では macOS で書ける範囲で
+  GREEN に到達し、実機 verify は post-Sprint follow-up に。
+
+## Follow-ups
+
+- **Windows 実機 verification**: stakeholder テスト環境で
+  (i) `VERDE_HRESULT=0x80070020` emit、(ii) UI EXCEL_OPEN ダイアログ発火 を
+  verify。失敗時は HRESULT 抽出ロジック (`InnerException.HResult` 優先) 要調整。
+- **Sprint 26+N: #16 (lock staleness) 着手**: Sprint 24 の (a) OS native API
+  路線 + macOS cfg-gate fallback を base に Planning Sprint。Sprint 22 → 23 と
+  同じ Planning / 実装分離 pattern を踏襲。
+- **`ErrorKind::PermissionDenied` / `NotFound` UI wiring**: 現在 `#[allow(dead_code)]`
+  で保護されている variants に UI branches を足す際に allow 1 件ずつ外す。
+  production で `classify_hresult` 経路が HRESULT を 3 kinds に分類する
+  利点を UX に還元する追い込み作業。rule-of-three 未到達のため rule に
+  束縛されない — product signal を待つ。
+- **substring fallback の最終削除**: Windows CI で
+  `VERDE_HRESULT=0x80070020` emit を E2E verify できるようになったら
+  substring を削除。Sprint 23 `validate_ps_arg` 削除と同じ強保証レベルに
+  到達したタイミング。
 
 # Commit discipline notes
 
