@@ -122,12 +122,10 @@ impl ProjectManager {
         let mut meta = Self::read_meta(project_id)?;
         let hash = Self::content_hash(content);
         let line_count = content.lines().count();
-        meta.modules
-            .entry(filename.to_string())
-            .and_modify(|m| {
-                m.hash = hash.clone();
-                m.line_count = line_count;
-            });
+        meta.modules.entry(filename.to_string()).and_modify(|m| {
+            m.hash = hash.clone();
+            m.line_count = line_count;
+        });
         Self::write_meta(project_id, &meta)
     }
 
@@ -174,8 +172,7 @@ impl ProjectManager {
             // Pull the xlsm path out of meta and drop the meta/error before
             // crossing the .await — `Box<dyn Error>` is !Send and would
             // poison the future otherwise.
-            let xlsm_path: Option<String> =
-                Self::read_meta(project_id).ok().map(|m| m.xlsm_path);
+            let xlsm_path: Option<String> = Self::read_meta(project_id).ok().map(|m| m.xlsm_path);
 
             if let Some(xlsm_path) = xlsm_path {
                 let source_dir = project_dir.to_string_lossy().to_string();
@@ -194,10 +191,7 @@ impl ProjectManager {
         Ok(())
     }
 
-    pub async fn sync_to_excel(
-        &self,
-        _project_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn sync_to_excel(&self, _project_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         // TODO: PowerShell COM経由でExcelにインポート
         Ok(())
     }
@@ -257,11 +251,8 @@ impl ProjectManager {
     /// containing function panics or returns early. We avoid pulling in the
     /// `tempfile` crate just for this one call site.
     fn make_temp_dir(tag: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let base = std::env::temp_dir().join(format!(
-            "verde_conflict_{}_{}",
-            tag,
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("verde_conflict_{}_{}", tag, std::process::id()));
         // Clear any leftover from a previous crashed run so the new export
         // starts from a clean slate.
         let _ = std::fs::remove_dir_all(&base);
@@ -294,8 +285,7 @@ impl ProjectManager {
         };
 
         let temp_dir = Self::make_temp_dir(project_id)?;
-        let export_result =
-            VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
+        let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
         let excel_hashes = match export_result {
             Ok(_filenames) => Self::hash_files_in_dir(&temp_dir)?,
             Err(e) => {
@@ -352,8 +342,7 @@ impl ProjectManager {
                 // Freshly export Excel -> AppData, clobbering local edits,
                 // then refresh meta hashes so a subsequent check is clean.
                 std::fs::create_dir_all(&project_dir)?;
-                let exported =
-                    VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
+                let exported = VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
                 for filename in exported {
                     let path = project_dir.join(&filename);
                     if !path.exists() {
@@ -391,11 +380,8 @@ mod tests {
 
     #[test]
     fn hash_files_in_dir_hashes_every_non_dotfile() {
-        let tmp = std::env::temp_dir().join(format!(
-            "verde_hash_files_{}_{}",
-            std::process::id(),
-            "a"
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("verde_hash_files_{}_{}", std::process::id(), "a"));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join("A.bas"), "Sub Foo()\nEnd Sub\n").unwrap();
@@ -418,10 +404,8 @@ mod tests {
 
     #[test]
     fn hash_files_in_dir_returns_empty_when_dir_missing() {
-        let missing = std::env::temp_dir().join(format!(
-            "verde_hash_files_missing_{}",
-            std::process::id()
-        ));
+        let missing =
+            std::env::temp_dir().join(format!("verde_hash_files_missing_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&missing);
         let got = ProjectManager::hash_files_in_dir(&missing).unwrap();
         assert!(got.is_empty());

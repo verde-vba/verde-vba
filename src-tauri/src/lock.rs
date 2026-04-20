@@ -42,11 +42,9 @@ impl LockManager {
                         return Err("File is locked by another Verde instance".into());
                     }
                 } else {
-                    return Err(format!(
-                        "File is locked by {} on {}",
-                        info.user, info.machine
-                    )
-                    .into());
+                    return Err(
+                        format!("File is locked by {} on {}", info.user, info.machine).into(),
+                    );
                 }
             }
         }
@@ -70,10 +68,10 @@ impl LockManager {
     #[cfg(windows)]
     fn set_hidden_system_attrs(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
         use windows::Win32::Storage::FileSystem::{
             SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
         };
-        use windows::core::PCWSTR;
         let wide: Vec<u16> = path
             .as_os_str()
             .encode_wide()
@@ -158,11 +156,11 @@ mod tests {
     #[test]
     fn acquire_sets_hidden_system_attrs_on_windows() {
         use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
         use windows::Win32::Storage::FileSystem::{
             GetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
             INVALID_FILE_ATTRIBUTES,
         };
-        use windows::core::PCWSTR;
 
         let tmp = env::temp_dir().join(format!("verde_attr_test_{}.xlsm", std::process::id()));
         std::fs::write(&tmp, b"dummy").unwrap();

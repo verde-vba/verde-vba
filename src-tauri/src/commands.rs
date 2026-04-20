@@ -186,8 +186,7 @@ mod tests {
             |_| {},
             |_| {},
         );
-        let waker =
-            unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
         let mut cx = Context::from_waker(&waker);
         // Safety: fut is owned by this stack frame and never moved after
         // pinning here.
@@ -238,8 +237,7 @@ mod tests {
 
     #[test]
     fn open_project_returns_locked_error_when_held_by_other_machine() {
-        let tmp =
-            env::temp_dir().join(format!("verde_cmd_lock_test_{}.xlsm", std::process::id()));
+        let tmp = env::temp_dir().join(format!("verde_cmd_lock_test_{}.xlsm", std::process::id()));
         std::fs::write(&tmp, b"dummy").unwrap();
         let lock_path = LockManager::lock_path(tmp.to_str().unwrap());
 

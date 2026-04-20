@@ -28,10 +28,7 @@ fn returns_empty_when_all_three_sources_agree() {
 
     let got = detect_conflicts(&file, &meta, &excel);
 
-    assert!(
-        got.is_empty(),
-        "expected no conflicts, got {got:?}",
-    );
+    assert!(got.is_empty(), "expected no conflicts, got {got:?}",);
 }
 
 /// Scenario 2: Excel-side drift for one module.
