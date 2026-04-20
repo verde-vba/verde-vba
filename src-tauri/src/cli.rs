@@ -305,4 +305,76 @@ mod tests {
         let err = parse_args(&args).expect_err("empty --project should be rejected");
         assert!(err.contains("--project"), "message was: {err}");
     }
+
+    #[test]
+    fn parse_args_serve_accepts_short_alias_p() {
+        // Pin the `-p` short alias so it cannot be silently dropped; Claude
+        // Desktop configs and docs may rely on the short form.
+        let args = v(&["serve", "-p", "/tmp/x.xlsm"]);
+        assert_eq!(
+            parse_args(&args).unwrap(),
+            CliCommand::Serve {
+                project: "/tmp/x.xlsm".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn build_serve_command_sets_verde_project_env() {
+        // Regression guard for the Phase 2 bug where the CLI passed the
+        // project as a positional arg instead of via VERDE_PROJECT env.
+        let cmd = build_serve_command(Path::new("/tmp/x.xlsm"), Path::new("mcp/server.js"));
+        let found = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(VERDE_PROJECT_ENV));
+        let (_, value) = found.expect("VERDE_PROJECT env var must be set");
+        assert_eq!(value, Some(std::ffi::OsStr::new("/tmp/x.xlsm")));
+    }
+
+    #[test]
+    fn build_serve_command_uses_bun_runtime_and_server_js_arg() {
+        // Pin the runtime program and that the server script is passed as
+        // an argument.
+        let cmd = build_serve_command(Path::new("/tmp/x.xlsm"), Path::new("mcp/server.js"));
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("bun"));
+        assert!(
+            cmd.get_args()
+                .any(|a| a == std::ffi::OsStr::new("mcp/server.js")),
+            "server_js path should appear in argv"
+        );
+    }
+
+    #[test]
+    fn build_serve_command_does_not_pass_project_as_positional_arg() {
+        // Explicit regression pin for the Phase 2 bug: the project path
+        // must travel via env, not argv.
+        let cmd = build_serve_command(Path::new("/tmp/x.xlsm"), Path::new("mcp/server.js"));
+        for arg in cmd.get_args() {
+            assert_ne!(arg, std::ffi::OsStr::new("--project"));
+            assert_ne!(arg, std::ffi::OsStr::new("/tmp/x.xlsm"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_propagates_exit_status_from_runner() {
+        // Gated to Unix because ExitStatus construction from a raw code is
+        // platform-specific; the contract being pinned (runner's Ok value
+        // is returned verbatim) is platform-independent.
+        use std::os::unix::process::ExitStatusExt;
+        let cmd = build_serve_command(Path::new("/tmp/x.xlsm"), Path::new("mcp/server.js"));
+        let expected = ExitStatus::from_raw(0);
+        let got = run(cmd, |_c| Ok(expected)).expect("runner Ok should pass through");
+        assert_eq!(got.code(), expected.code());
+    }
+
+    #[test]
+    fn run_propagates_io_error_from_runner() {
+        let cmd = build_serve_command(Path::new("/tmp/x.xlsm"), Path::new("mcp/server.js"));
+        let err = run(cmd, |_c| {
+            Err(io::Error::new(io::ErrorKind::NotFound, "boom"))
+        })
+        .expect_err("runner Err should pass through");
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
 }
