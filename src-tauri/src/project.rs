@@ -206,7 +206,13 @@ impl ProjectManager {
         }
         // Pull xlsm_path out of meta and drop the meta before crossing any
         // .await — `Box<dyn Error>` is !Send and would poison the future.
-        let xlsm_path = Self::read_meta(project_id)?.xlsm_path;
+        // Split read + parse so we only wrap the parse failure with the
+        // "project metadata is corrupted" marker. I/O errors (permissions,
+        // disappearing file between exists() and read) still bubble up raw.
+        let meta_content = std::fs::read_to_string(Self::meta_path(project_id))?;
+        let meta: ProjectMeta = serde_json::from_str(&meta_content)
+            .map_err(|e| format!("project metadata is corrupted: {e}"))?;
+        let xlsm_path = meta.xlsm_path;
         let source_dir = project_dir.to_string_lossy().to_string();
 
         for entry in std::fs::read_dir(&project_dir)? {
@@ -494,6 +500,34 @@ mod tests {
             msg.to_lowercase().contains("project not found"),
             "error message must contain 'project not found' (stable substring \
              for frontend pattern-matching), got: {msg}"
+        );
+    }
+
+    #[test]
+    fn sync_to_excel_returns_corrupted_meta_when_meta_json_invalid() {
+        // Arrange a project dir containing a malformed .verde-meta.json so
+        // serde_json::from_str fails. We expect sync_to_excel to wrap the
+        // parse error in a stable substring the frontend can branch on.
+        let project_id = format!("corrupted_{}_{}", std::process::id(), "meta");
+        let dir = ProjectManager::project_dir(&project_id);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".verde-meta.json"), "{ this is not valid json").unwrap();
+
+        let manager = ProjectManager::new();
+        let result = block_on(manager.sync_to_excel(&project_id));
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            result.is_err(),
+            "expected Err when .verde-meta.json is malformed"
+        );
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.to_lowercase().contains("project metadata is corrupted"),
+            "error message must contain 'project metadata is corrupted' \
+             (stable substring for frontend pattern-matching), got: {msg}"
         );
     }
 }
