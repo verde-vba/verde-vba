@@ -34,9 +34,10 @@ fmt:
 clippy:
     cd src-tauri && cargo clippy -- -D warnings
 
-# Start MCP server (for AI clients)
+# Start MCP server (for AI clients) — routes through the `verde` CLI
+# so Claude Desktop can invoke the same entry point in production.
 serve project:
-    VERDE_PROJECT="{{project}}" bun mcp/server.js
+    cd src-tauri && cargo run --quiet --bin verde -- serve --project "{{project}}"
 
 # Clean build artifacts
 clean:

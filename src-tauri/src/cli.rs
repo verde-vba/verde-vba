@@ -4,13 +4,35 @@
 //! - No arguments (or unrecognized first arg) → launch the Tauri GUI.
 //! - `verde serve --project <xlsm-path>` → spawn the MCP server over stdio.
 //!
-//! Keeping the parser pure (no I/O) lets us unit-test argument handling
-//! without shelling out. The `run_serve` entry point performs the spawn.
+//! The parser (backed by `clap`) and the [`build_serve_command`] helper are
+//! pure — they produce a fully-formed [`Command`] without running it — so
+//! unit tests can assert on the exact program, args, and env the CLI would
+//! hand to the OS. The [`run`] helper accepts an injectable runner closure
+//! so the spawn step itself is also testable in isolation.
 
+use clap::{Args, Parser, Subcommand};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{exit, Command};
+use std::process::{exit, Command, ExitStatus};
+
+/// Name of the environment variable the MCP server reads to locate the
+/// active `.xlsm` project. Kept as a constant so tests can assert on it.
+pub const VERDE_PROJECT_ENV: &str = "VERDE_PROJECT";
+
+/// JavaScript runtime used to execute the MCP server script. For the MVP
+/// this is fixed to `bun`; a future iteration may fall back to `node`.
+pub const MCP_RUNTIME: &str = "bun";
+
+/// Relative path from the MCP server's containing directory root that the
+/// CLI hands to the runtime. Stored as a constant to keep
+/// [`build_serve_command`] deterministic for tests.
+pub const MCP_SERVER_SCRIPT: &str = "mcp/server.js";
 
 /// Parsed top-level command for the CLI.
+///
+/// [`parse_args`] returns this enum so callers (currently `main`) can
+/// dispatch to either the GUI entry point or the MCP spawn path without
+/// re-walking argv.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliCommand {
     /// Default mode: launch the desktop GUI.
@@ -19,57 +41,127 @@ pub enum CliCommand {
     Serve { project: String },
 }
 
+/// `clap`-derived root parser.
+///
+/// Wrapping clap's types in a private struct keeps the public surface small
+/// — callers only need [`parse_args`] and [`CliCommand`].
+#[derive(Debug, Parser)]
+#[command(
+    name = "verde",
+    about = "AI-native VBA development environment",
+    disable_help_subcommand = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<CliSubcommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum CliSubcommand {
+    /// Start the MCP server for a given `.xlsm` project.
+    Serve(ServeArgs),
+}
+
+#[derive(Debug, Args)]
+struct ServeArgs {
+    /// Absolute path to the `.xlsm` workbook to serve.
+    #[arg(short = 'p', long = "project")]
+    project: String,
+}
+
 /// Parse CLI arguments (excluding argv[0]) into a [`CliCommand`].
 ///
 /// Returns `Err(message)` for usage errors so callers can decide whether to
-/// print and exit or propagate. This keeps the parser easy to test.
+/// print and exit or propagate. Unknown subcommands fall back to the GUI
+/// path to preserve the double-click launch experience.
 pub fn parse_args(args: &[String]) -> Result<CliCommand, String> {
-    let Some(first) = args.first() else {
-        return Ok(CliCommand::Gui);
-    };
+    // `clap` wants the program name at argv[0]; prepend a placeholder.
+    let mut argv: Vec<String> = Vec::with_capacity(args.len() + 1);
+    argv.push("verde".to_string());
+    argv.extend(args.iter().cloned());
 
-    match first.as_str() {
-        "serve" => parse_serve(&args[1..]),
-        // Unrecognized subcommands fall through to GUI for now; a future
-        // version may surface a help message instead.
-        _ => Ok(CliCommand::Gui),
+    match Cli::try_parse_from(&argv) {
+        Ok(Cli { command: None }) => Ok(CliCommand::Gui),
+        Ok(Cli {
+            command: Some(CliSubcommand::Serve(ServeArgs { project })),
+        }) => Ok(CliCommand::Serve { project }),
+        Err(err) => classify_parse_error(args, err),
     }
 }
 
-fn parse_serve(args: &[String]) -> Result<CliCommand, String> {
-    let mut project: Option<String> = None;
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--project" => {
-                project = iter
-                    .next()
-                    .cloned()
-                    .or_else(|| Some(String::new()))
-                    .filter(|s| !s.is_empty());
-                if project.is_none() {
-                    return Err("--project requires a value".to_string());
-                }
-            }
-            other => {
-                return Err(format!("unexpected argument: {other}"));
-            }
-        }
+/// Decide whether a clap error should surface to the user or silently route
+/// to the GUI.
+///
+/// Tauri launches the binary with no args on double-click; an unknown first
+/// arg (e.g. a file path the OS passed in) should not blow up the app, so
+/// only `serve`-specific errors propagate.
+fn classify_parse_error(args: &[String], err: clap::Error) -> Result<CliCommand, String> {
+    let first_is_serve = args.first().map(|s| s.as_str()) == Some("serve");
+    if first_is_serve {
+        Err(format_serve_error(err))
+    } else {
+        Ok(CliCommand::Gui)
     }
-    match project {
-        Some(project) => Ok(CliCommand::Serve { project }),
-        None => Err("missing required --project <xlsm-path>".to_string()),
+}
+
+/// Flatten a clap error into a short message suited for `eprintln!`.
+///
+/// Clap can render multi-line diagnostics (e.g. the missing-required-arg
+/// case lists offenders on a follow-up line). We keep every line before
+/// the "Usage:" block so the resulting message still mentions flag names,
+/// which tests and users both rely on.
+fn format_serve_error(err: clap::Error) -> String {
+    let rendered = err.to_string();
+    let body: Vec<&str> = rendered
+        .lines()
+        .take_while(|l| !l.trim_start().to_ascii_lowercase().starts_with("usage:"))
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if body.is_empty() {
+        rendered.trim().to_string()
+    } else {
+        body.join(" ")
+            .trim_start_matches("error:")
+            .trim()
+            .to_string()
     }
+}
+
+/// Build the `Command` that would spawn the MCP server for `project`.
+///
+/// Pure function — does not touch the filesystem or spawn anything. The
+/// returned [`Command`] carries the runtime program, the resolved
+/// `server_js` path as its first argument, and `VERDE_PROJECT` set to
+/// `project`. Tests use this to assert the exact shape passed to the OS.
+pub fn build_serve_command(project: &Path, server_js: &Path) -> Command {
+    let mut cmd = Command::new(MCP_RUNTIME);
+    cmd.arg(server_js);
+    cmd.env(VERDE_PROJECT_ENV, project);
+    cmd
+}
+
+/// Execute a prepared `Command` using an injectable runner.
+///
+/// The runner closure exists so tests can drive [`run`] without forking a
+/// real child process. Production code hands in a closure that calls
+/// `Command::status`.
+pub fn run<F>(cmd: Command, runner: F) -> io::Result<ExitStatus>
+where
+    F: FnOnce(Command) -> io::Result<ExitStatus>,
+{
+    runner(cmd)
 }
 
 /// Entry point invoked from `main` when the `serve` subcommand is selected.
 ///
-/// Exits the process; never returns on success.
+/// Exits the process; never returns on success or failure. Re-parses `args`
+/// as `serve <args...>` so callers can pass through the tail of argv they
+/// already matched.
 pub fn run_serve(args: &[String]) -> ! {
     match parse_args_with_subcommand(args) {
         Ok(CliCommand::Serve { project }) => exec_serve(&project),
         Ok(CliCommand::Gui) => {
-            // Should not be reachable from main's dispatch, but guard anyway.
             eprintln!("Usage: verde serve --project <xlsm-path>");
             exit(2);
         }
@@ -81,8 +173,8 @@ pub fn run_serve(args: &[String]) -> ! {
     }
 }
 
-/// Internal helper: re-parses with "serve" implicitly prepended so the
-/// caller can hand us the tail of argv after the subcommand.
+/// Prepend the `serve` subcommand token so [`parse_args`] can validate
+/// flags the same way it would for a top-level invocation.
 fn parse_args_with_subcommand(args: &[String]) -> Result<CliCommand, String> {
     let mut full = Vec::with_capacity(args.len() + 1);
     full.push("serve".to_string());
@@ -99,14 +191,11 @@ fn exec_serve(project: &str) -> ! {
         exit(1);
     });
 
-    let status = Command::new("bun")
-        .arg(&server_js)
-        .arg(project)
-        .status()
-        .unwrap_or_else(|e| {
-            eprintln!("verde serve: failed to spawn bun: {e}");
-            exit(1);
-        });
+    let cmd = build_serve_command(Path::new(project), &server_js);
+    let status = run(cmd, |mut c| c.status()).unwrap_or_else(|e| {
+        eprintln!("verde serve: failed to spawn {MCP_RUNTIME}: {e}");
+        exit(1);
+    });
 
     exit(status.code().unwrap_or(1));
 }
@@ -126,13 +215,13 @@ fn locate_server_js() -> Result<PathBuf, Vec<PathBuf>> {
 
     let candidates: Vec<PathBuf> = vec![
         // Installed: sibling resources directory
-        exe_dir.join("mcp").join("server.js"),
+        exe_dir.join(MCP_SERVER_SCRIPT),
         // cargo run from src-tauri: target/debug or target/release
-        exe_dir.join("../../mcp/server.js"),
+        exe_dir.join("../..").join(MCP_SERVER_SCRIPT),
         // cargo run from repo root (target/debug inside src-tauri/target)
-        exe_dir.join("../../../mcp/server.js"),
+        exe_dir.join("../../..").join(MCP_SERVER_SCRIPT),
         // Extra hop for workspace layouts
-        exe_dir.join("../../../../mcp/server.js"),
+        exe_dir.join("../../../..").join(MCP_SERVER_SCRIPT),
     ];
 
     for c in &candidates {
