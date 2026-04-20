@@ -110,11 +110,10 @@ function App() {
         filters: [{ name: t("common.fileTypeExcelMacro"), extensions: ["xlsm"] }],
       });
       if (!path) return;
-      const xlsmPath = path as string;
       try {
-        await openProject(xlsmPath);
+        await openProject(path);
       } catch (e) {
-        handleCaughtBackendError(e, xlsmPath);
+        handleCaughtBackendError(e, path);
       }
     } catch {
       // Dev mode fallback (plugin-dialog only available inside Tauri runtime)
