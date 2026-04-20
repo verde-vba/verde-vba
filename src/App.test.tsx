@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // jsdom doesn't implement matchMedia; useTheme calls it synchronously on
@@ -90,5 +90,48 @@ describe("App error banner", () => {
     // ran AND that toI18nKey's mapping round-trips through react-i18next.
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent("Project not found");
+  });
+
+  it("clears the error banner when the user clicks the dismiss button", async () => {
+    // Arrange: same backend shape as the projectNotFound test — settings
+    // load succeeds, open_project rejects so the banner appears, then the
+    // user dismisses it.
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return Promise.resolve({
+          theme: "system",
+          language: "auto",
+          editor: {
+            font_size: 14,
+            font_family: "monospace",
+            tab_size: 4,
+            word_wrap: "off",
+            minimap: true,
+          },
+          sync: { auto_sync_to_excel: true },
+          trust: { vbaAcknowledged: true },
+        });
+      }
+      if (cmd === "open_project") {
+        return Promise.reject(
+          new Error("project not found: deadbeef00000000")
+        );
+      }
+      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+    });
+
+    // Act: render, trigger the failing open, wait for the banner.
+    render(<App />);
+    const openButton = await screen.findByRole("button", {
+      name: "Open .xlsm",
+    });
+    fireEvent.click(openButton);
+    await screen.findByRole("alert");
+
+    // Click the dismiss button — label comes from en.json common.dismiss.
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    // Assert: the banner is gone. waitFor handles the React state flush.
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 });
