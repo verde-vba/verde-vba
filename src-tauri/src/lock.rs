@@ -261,6 +261,26 @@ impl LockManager {
             ttl_expired
         }
     }
+
+    /// Testable variant of `is_stale` that accepts an injectable image-name
+    /// provider and a `now` timestamp. Sprint 27 commit 3 RED stub: the
+    /// provider argument is **accepted but not consumed** so that the
+    /// image-match-aware RED test fails until commit 4 wires the provider
+    /// into the same-machine branch.
+    #[allow(dead_code)]
+    pub(crate) fn is_stale_with_provider(
+        info: &LockInfo,
+        _provider: fn(u32) -> Option<String>,
+        now: DateTime<Utc>,
+    ) -> bool {
+        let same_machine = info.machine == Self::machine_name();
+        let ttl_expired = is_stale_by_ttl(&info.locked_at, now);
+        if same_machine {
+            !Self::is_pid_alive(info.pid) || ttl_expired
+        } else {
+            ttl_expired
+        }
+    }
 }
 
 #[cfg(test)]
@@ -357,6 +377,29 @@ mod tests {
         assert!(
             LockManager::is_stale(&stale_foreign),
             "TTL-expired foreign-host lock should be reapable to avoid permanent wedge"
+        );
+    }
+
+    fn foreign_image_provider(_pid: u32) -> Option<String> {
+        Some("explorer.exe".to_string())
+    }
+
+    #[test]
+    fn is_stale_reaps_same_machine_alive_pid_with_foreign_image() {
+        // Sprint 26 durable pinned-negative signal, newly authored (no RED
+        // heritage from earlier sprints). Same-machine + PID alive (self)
+        // + within TTL + provider reports a non-Verde image → must reap
+        // the lock. This is the Sprint 18 wedge that image-match closes.
+        let info = LockInfo {
+            user: "me".to_string(),
+            machine: LockManager::machine_name(),
+            pid: std::process::id(),
+            app: "Verde".to_string(),
+            locked_at: Utc::now().to_rfc3339(),
+        };
+        assert!(
+            LockManager::is_stale_with_provider(&info, foreign_image_provider, Utc::now()),
+            "alive same-machine PID whose image is not Verde must be reaped as stale"
         );
     }
 
