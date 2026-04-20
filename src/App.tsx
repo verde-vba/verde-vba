@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Banner } from "./components/Banner";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { Editor } from "./components/Editor";
 import { LockDialog } from "./components/LockDialog";
@@ -281,112 +282,36 @@ function App() {
                 ? errorBanner.message
                 : "";
           return (
-            <div
-              role="alert"
-              style={{
-                padding: "8px 12px",
-                background: "var(--error, #b00020)",
-                color: "var(--bg-primary, #ffffff)",
-                borderTop: "1px solid var(--border)",
-                fontSize: "12px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "12px",
-              }}
+            <Banner
+              tone="error"
+              onDismiss={() => setErrorBanner(null)}
+              dismissLabel={t("common.dismiss")}
             >
-              <span>
-                {title ? <strong>{title}: </strong> : null}
-                {message}
-              </span>
-              <button
-                type="button"
-                onClick={() => setErrorBanner(null)}
-                style={{
-                  padding: "2px 10px",
-                  background: "transparent",
-                  color: "inherit",
-                  border: "1px solid currentColor",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                }}
-              >
-                {t("common.dismiss")}
-              </button>
-            </div>
+              {title ? <strong>{title}: </strong> : null}
+              {message}
+            </Banner>
           );
         })()}
 
       {saveBlockedPrompt && (
-        <div
-          role="alert"
-          style={{
-            padding: "8px 12px",
-            background: "var(--bg-secondary, #fff4e5)",
-            color: "var(--text-primary)",
-            borderTop: "1px solid var(--border)",
-            fontSize: "12px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "12px",
-          }}
+        <Banner
+          tone="warning"
+          onDismiss={() => setSaveBlockedPrompt(null)}
+          dismissLabel="Dismiss"
         >
-          <span>{saveBlockedPrompt}</span>
-          <button
-            type="button"
-            onClick={() => setSaveBlockedPrompt(null)}
-            style={{
-              padding: "2px 10px",
-              background: "transparent",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border)",
-              borderRadius: "4px",
-              fontSize: "12px",
-              cursor: "pointer",
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
+          {saveBlockedPrompt}
+        </Banner>
       )}
 
       {excelOpenPrompt && (
-        <div
-          role="alert"
-          style={{
-            padding: "8px 12px",
-            background: "var(--bg-secondary, #fff4e5)",
-            color: "var(--text-primary)",
-            borderTop: "1px solid var(--border)",
-            fontSize: "12px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "12px",
-          }}
+        <Banner
+          tone="warning"
+          onDismiss={() => setExcelOpenPrompt(null)}
+          dismissLabel="Dismiss"
         >
-          <span>
-            Cannot save while Excel has the workbook open.
-            {excelOpenPrompt ? ` (${excelOpenPrompt})` : ""}
-          </span>
-          <button
-            type="button"
-            onClick={() => setExcelOpenPrompt(null)}
-            style={{
-              padding: "2px 10px",
-              background: "transparent",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border)",
-              borderRadius: "4px",
-              fontSize: "12px",
-              cursor: "pointer",
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
+          Cannot save while Excel has the workbook open.
+          {excelOpenPrompt ? ` (${excelOpenPrompt})` : ""}
+        </Banner>
       )}
 
       <StatusBar
