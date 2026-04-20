@@ -46,6 +46,26 @@ pub async fn open_project(xlsm_path: String) -> Result<ProjectInfo, String> {
 }
 
 #[command]
+pub async fn close_project(xlsm_path: String) -> Result<(), String> {
+    LockManager::release(&xlsm_path).map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn force_open_project(xlsm_path: String) -> Result<ProjectInfo, String> {
+    // Force-open is the user's explicit override after seeing the LOCKED
+    // dialog. Best-effort drop the existing sentinel — if release fails
+    // (e.g. file already gone), acquire below will surface the real
+    // problem.
+    let _ = LockManager::release(&xlsm_path);
+    LockManager::acquire(&xlsm_path).map_err(|e| e.to_string())?;
+    let manager = ProjectManager::new();
+    manager.open(&xlsm_path).await.map_err(|e| {
+        let _ = LockManager::release(&xlsm_path);
+        e.to_string()
+    })
+}
+
+#[command]
 pub async fn save_module(request: ModuleSaveRequest) -> Result<(), String> {
     let manager = ProjectManager::new();
     manager

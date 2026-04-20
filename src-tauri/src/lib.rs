@@ -24,6 +24,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_project,
+            close_project,
+            force_open_project,
             save_module,
             sync_to_excel,
             sync_from_excel,
