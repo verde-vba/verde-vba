@@ -510,6 +510,57 @@ mod tests {
     }
 
     #[test]
+    fn sync_to_excel_succeeds_silently_when_project_dir_has_no_modules() {
+        // Arrange a project dir that contains ONLY a valid .verde-meta.json
+        // with an empty modules map — no .bas/.cls/.frm files. The read_dir
+        // loop body will not execute for any module, so VbaBridge::import is
+        // never called (which matters because import errors on non-Windows).
+        // This is the sole sync_to_excel happy-path branch observable on
+        // macOS/Linux CI: pinning it prevents a future refactor from
+        // silently flipping "no modules -> Ok" to "no modules -> Err".
+        let project_id = format!("empty_modules_{}", std::process::id());
+        let dir = ProjectManager::project_dir(&project_id);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let meta = ProjectMeta {
+            xlsm_path: "/tmp/nonexistent.xlsm".to_string(),
+            project_id: project_id.clone(),
+            exported_at: "2026-04-20T00:00:00Z".to_string(),
+            modules: HashMap::new(),
+        };
+        let meta_json = serde_json::to_string(&meta).unwrap();
+        let meta_file = dir.join(".verde-meta.json");
+        std::fs::write(&meta_file, meta_json).unwrap();
+
+        let manager = ProjectManager::new();
+        let result = block_on(manager.sync_to_excel(&project_id));
+
+        // Capture side-effect-free assertions before teardown.
+        let dir_still_exists = dir.exists();
+        let meta_still_exists = meta_file.exists();
+        // Re-read meta to confirm modules map is still empty (no bookkeeping
+        // flowed through because no files were iterated).
+        let roundtrip: ProjectMeta =
+            serde_json::from_str(&std::fs::read_to_string(&meta_file).unwrap()).unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            result.is_ok(),
+            "expected Ok(()) when project dir has zero module files, got: {:?}",
+            result.err().map(|e| e.to_string())
+        );
+        assert!(dir_still_exists, "project dir must remain after sync");
+        assert!(meta_still_exists, "meta file must remain after sync");
+        assert!(
+            roundtrip.modules.is_empty(),
+            "modules map must stay empty when no files iterated, got: {:?}",
+            roundtrip.modules
+        );
+    }
+
+    #[test]
     fn sync_to_excel_returns_corrupted_meta_when_meta_json_invalid() {
         // Arrange a project dir containing a malformed .verde-meta.json so
         // serde_json::from_str fails. We expect sync_to_excel to wrap the
