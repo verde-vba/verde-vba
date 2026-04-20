@@ -12,9 +12,10 @@ import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useErrorRouting } from "./hooks/useErrorRouting";
 import { useModuleTabs } from "./hooks/useModuleTabs";
 import { useOpenFile } from "./hooks/useOpenFile";
+import { useSave } from "./hooks/useSave";
 import { useTheme } from "./hooks/useTheme";
 import { useTrust } from "./hooks/useTrust";
-import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./hooks/useVerdeProject";
+import { useVerdeProject } from "./hooks/useVerdeProject";
 import { toI18nKey } from "./lib/error-parse";
 
 function App() {
@@ -59,10 +60,15 @@ function App() {
     routeParsedError,
     fileTypeLabel: t("common.fileTypeExcelMacro"),
   });
+  const { saveBlockedPrompt, setSaveBlockedPrompt, handleSave } = useSave({
+    activeModule,
+    saveModule,
+    setExcelOpenPrompt,
+    handleCaughtBackendError,
+    saveBlockedMessage: t("status.saveBlocked"),
+    xlsmPath: project?.xlsm_path ?? null,
+  });
   const [editorContent, setEditorContent] = useState("");
-  const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(
-    null
-  );
 
   const handleTrustClose = useCallback(() => {
     void acknowledgeTrust();
@@ -84,31 +90,6 @@ function App() {
   const handleKeepExcel = useCallback(() => {
     void resolveConflict("excel");
   }, [resolveConflict]);
-
-
-  const handleSave = useCallback(
-    async (content: string) => {
-      if (!activeModule) return;
-      try {
-        await saveModule(activeModule.filename, content);
-        setExcelOpenPrompt(null);
-        setSaveBlockedPrompt(null);
-      } catch (e) {
-        // Read-only saves short-circuit in the hook with a sentinel
-        // message — translate it here rather than leaking the constant
-        // into the render tree.
-        if (e instanceof Error && e.message === SAVE_BLOCKED_READONLY) {
-          setSaveBlockedPrompt(t("status.saveBlocked"));
-          return;
-        }
-        handleCaughtBackendError(e, project?.xlsm_path ?? null);
-      }
-      // TODO: wire ConflictDialog here once the backend reports
-      // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
-      // is a save-time lock condition rather than a content conflict).
-    },
-    [activeModule, saveModule, t, handleCaughtBackendError, project?.xlsm_path]
-  );
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
