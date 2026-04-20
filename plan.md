@@ -9,7 +9,7 @@ All earlier sprints collapse to one-line rows in the index table below —
 commit-level detail. Compression-only sprints (like Sprint 16 itself) do
 not consume a detail slot, and probe-only refinement sprints occupy one
 slot at whatever density their outcome requires (often < 50 lines).
-Currently detailed: Sprint 14 / 15 / 17. A planner adding a new sprint
+Currently detailed: Sprint 15 / 17 / 18. A planner adding a new sprint
 section must demote the now-oldest detailed sprint into the index row in
 the same commit.
 
@@ -28,86 +28,9 @@ the same commit.
 | 11     | Residual `path as string` cast Tidy in `handleOpenFile`                         | `d024997` drop redundant cast (docs `15233cf`). — closes type-bypass arc for `src/**` (incomplete; `main.tsx:9` missed, reopened in Sprint 15). |
 | 12     | Backlog refinement only, candidates A / B / C enumerated                        | Docs `635a1af` — no code changes; rule-of-two Candidate B, product-gated A, restructure-PBI-gated C. |
 | 13     | Catalogue re-evaluation, no situation change                                    | Docs `651306c` — `openModules` probe confirmed 2 sites (still rule-of-two); A / C / four follow-ups unchanged; tests 32/32. Tail advisory: a third refinement-only sprint would argue for product conversation. |
+| 14     | Third consecutive refinement-only; escalation advisory to product               | Docs `951c55c` — no code change; `openModules` probe + `git log` re-run unchanged; **Sprint 15 planning must include proactive product / PBI conversation** (durable signal). |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
-
-# Sprint 14 — Third consecutive refinement-only, escalate to product conversation
-
-## Goal
-
-Honor Sprint 13's tail instruction: re-run the same probe set, confirm
-Candidate B signal and A / C / follow-up gates unchanged, and — crucially
-— escalate the advisory from "acceptable but argues for proactive
-conversation" to an **explicit recommendation** for a product / PBI
-dialogue before Sprint 15. Three consecutive silent re-scans are the
-threshold where continuing to probe without fresh input starts burning
-sprint budget that would yield more value from stakeholder engagement.
-
-## Scope
-
-- Re-run probes: `rg "openModules\.(find|filter|some|every)"`; `git
-  log --oneline -5` for new PBI arrival signal.
-- Confirm Candidates A / C and four follow-ups unchanged.
-- **No code change**, **no sprint tag**.
-- **New**: explicit escalation note — Sprint 15 should not silently
-  re-probe; either a product / PBI conversation surfaces a fresh
-  target, or the planner documents why a fourth consecutive re-scan
-  is justified.
-
-## Re-scan findings
-
-- `git log --oneline -5`: no new commits since Sprint 13's `651306c`;
-  five most recent are docs / refactor from Sprints 10–13. **No new
-  PBI has landed.**
-- `rg "openModules\.(find|filter|some|every)"`: same two `App.tsx`
-  sites (`:174` find, `:185` filter). **No third filename-predicate
-  call site has accreted.**
-
-Working tree: clean.
-
-## Candidate B re-confirmation
-
-Rule-of-two, unchanged from Sprint 12 / 13. Continues to defer.
-
-## Candidate A / C / follow-up re-evaluation
-
-- **Candidate A**: no UX / docs pass landed. Gate unchanged.
-- **Candidate C**: no second error-routing consumer, no restructure
-  PBI scheduled. Gate unchanged.
-- **Four follow-ups**: product decisions, telemetry, rule-of-three
-  evidence all remain unavailable.
-
-## Decision
-
-**Sprint 14 is refinement-only, same as Sprint 12 / 13.** Docs commit
-`951c55c`; no sprint tag. **Advisory escalated** — Sprint 15 planning
-should include proactive product / PBI conversation. Tests 32/32;
-tsc clean; cargo untouched.
-
-## Key decisions (condensed)
-
-- **Three consecutive refinement-only sprints crosses the escalate
-  threshold**: silent re-scans scale O(sprint) while candidate pool
-  is O(1) — continuing turns backlog hygiene into backlog theatre.
-- **"Escalate" is not "abandon"**: existing candidates / follow-ups
-  remain valid backlog items; escalation means "seek the input that
-  would unblock one of them".
-- **Sprint 14's escalation must survive into Sprint 15 planning**:
-  this section is the durable signal a future planner sees before
-  another silent re-probe.
-
-## Follow-ups — Sprint 15 guidance (explicit)
-
-1. Before any code-level probe, surface the backlog state to product
-   / PO channel: share the four gated follow-ups and Candidates A / B
-   / C with current "why not now" notes; ask which (if any) has moved.
-2. If product surfaces a fresh PBI, pick it up via normal Planning.
-3. If product confirms no movement, document the confirmation and
-   consider either (a) deliberately-chosen rule-of-two Tidy with
-   rule-relaxation rationale, or (b) a test-coverage / observability
-   investment that doesn't depend on external gates.
-4. If neither is viable, Sprint 15 may return to refinement-only — but
-   must explicitly record why escalation did not yield a pickup.
 
 # Sprint 15 — Type-bypass arc completion for `main.tsx` root lookup
 
@@ -273,6 +196,138 @@ Tests / tsc / cargo untouched.
 - Backlog #12 is a Planning pickup (not a Tidy) once the backend
   error-kind lands: dialog + routing both need design.
 
+# Sprint 18 — Security hardening: 2 CRITICAL + 2 MEDIUM + 1 bonus
+
+## Goal
+
+Pause-breaking security sprint. Five cycles of refinement-only /
+technical-exception work (Sprints 12–17) had fixated on frontend quality
+and **never probed the external-I/O boundary** — specifically the
+PowerShell bridge (`vba_bridge.rs`) and the MCP tool surface
+(`mcp/server.js`). A stakeholder-initiated audit surfaced two CRITICAL
+vulnerabilities plus two MEDIUM correctness issues, all in code that
+the rule-of-three / type-bypass / i18n sweeps had structurally
+sidestepped.
+
+## Pause exit rationale
+
+`plan.md:308` restart condition (c) — "新規 PBI が stakeholder から
+明示的に投入される" — was met by the user explicitly directing the
+planner to address the 4 findings. This is the designed exit, not a
+planner-side re-interpretation of (a) or (b), both of which remain
+unmet.
+
+## Scope
+
+- **PBI #1 (CRITICAL) — MCP path traversal.** `mcp/server.js` handlers
+  composed `join(projectDir, args.module)` without validation. Prompt
+  injection via workbook source could coerce an AI client into writing
+  to `../../.../Startup/pwn.bat` via `write_module`, or deleting
+  arbitrary files via `delete_module`. **Fix**: `safeModulePath`
+  whitelist-regex + resolved-prefix containment check, routed through
+  every handler.
+- **PBI #2 (CRITICAL) — PowerShell injection in `vba_bridge.rs`.**
+  `export` / `import` embedded `xlsm_path`, `output_dir`,
+  `module_name`, `module_path` directly into a PS `-Command` script
+  via `format!` with double-quoted string literals. A workbook whose
+  `VB_Name` was `"; Start-Process calc.exe; #` would execute arbitrary
+  PowerShell on first open. **Fix**: `validate_ps_arg` denylist
+  (`"`, `` ` ``, `$`, `;`, newline, control chars), not
+  `#[cfg(windows)]`-gated so darwin CI exercises the same surface.
+- **PBI #3 (MEDIUM) — Lock wedge via Windows PID reuse.** `is_pid_alive`
+  alone was unreliable for stale detection: a crashed Verde's PID,
+  reassigned to Explorer/notepad, would report alive forever and wedge
+  the lock. **Fix**: unified `LockManager::is_stale` decision table
+  with a 7-day TTL fallback (conservative; long-running Verde sessions
+  remain respected). **Bonus**: `Cargo.toml` was missing
+  `Win32_System_Threading`, which `lock.rs:109` requires — a latent
+  Windows-build break, caught while editing the lock path.
+- **PBI #4 (MEDIUM) — `classify_import_error` locale fragility.** The
+  EXCEL_OPEN substring list was English-only and invisible to grep;
+  on Japanese Excel the "close and retry" dialog never fires. **Fix**:
+  extract to named `EXCEL_OPEN_SUBSTRINGS` const with an explicit
+  doc-comment on the limitation; extract `is_excel_open_error` as a
+  pure predicate; pin each English substring AND the known Japanese
+  miss with tests (the latter must be UPDATED not deleted when
+  follow-up #17 lands).
+
+## Changes landed (on `main`, not pushed)
+
+| Commit  | Type                | Summary                                                       |
+| ------- | ------------------- | ------------------------------------------------------------- |
+| 32b8d5f | `fix(mcp)!`         | Path-traversal hardening (breaking: invalid module throws)    |
+| 7c00520 | `fix(vba-bridge)`   | Reject PS-sensitive chars before `format!`                    |
+| 084ee38 | `fix(lock)`         | TTL fallback for PID reuse + `Win32_System_Threading` feature |
+| c875c58 | `refactor(project)` | Pin EXCEL_OPEN substrings + pin Japanese-locale miss          |
+| e8064d2 | `chore(lock)`       | Drop dead `current_machine_name` helper post-`is_stale`       |
+| (docs)  | `docs(plan)`        | This sprint section + Sprint 14 demotion + backlog updates    |
+
+## Acceptance criteria (verified)
+
+- `cargo test --lib` — **55 passed** (was 46); +9 vba_bridge, +5 lock,
+  +4 project tests.
+- `cargo clippy --lib -- -D warnings` — clean.
+- `bun run test` (frontend) — **32 passed** (unchanged; no src/** touch).
+- `bun run tsc --noEmit` — clean.
+- `npx vitest run` (mcp) — **25 passed** (was 11); +14 path-traversal tests.
+
+## Key decisions
+
+- **Bundle all 4 as one sprint (option A)**: rejected the
+  split-into-4-sprints path because (a) each PBI is narrowly scoped
+  and independently committed, so `git blame` stays clean within each
+  file; (b) batching the Pause-exit signal into one sprint preserves
+  the "security hardening arc" as a single inspectable unit; (c) the
+  plan-bloat policy budgets one detailed slot per sprint, and four
+  separate sprints would have demoted real decision history
+  unnecessarily.
+- **PS validator is denylist, not allowlist, and explicitly MVP**:
+  `validate_ps_arg` rejects `"`, `` ` ``, `$`, `;`, control chars. A
+  strict allowlist would block legitimate Unicode paths (日本語
+  filenames, etc.) the MVP should support. Follow-up #15 tracks the
+  real fix: pass arguments via `-ArgumentList` + `param(...)` so the
+  script body never concatenates caller data.
+- **TTL threshold 7 days, not 24h**: the obvious failure mode of a
+  too-aggressive TTL is silently reaping a legitimate long-running
+  Verde session. 7 days is well past any realistic uninterrupted
+  Verde session (daily laptop sleep/resume cycles, OS updates) while
+  still bounding the PID-reuse wedge window.
+- **EXCEL_OPEN Japanese-locale miss pinned as a negative assertion,
+  not "TODO"**: a comment would rot. A red test is unavoidable
+  feedback for anyone who tries to declare #17 done.
+- **Validator placed above `#[cfg(windows)]` boundary**: darwin CI
+  can run the same unit tests that gate the Windows COM path.
+  Prevents a future planner from weakening the validator on a non-
+  Windows workstation without seeing tests fail.
+- **`Win32_System_Threading` fix bundled with PBI #3**: discovered
+  while reading `lock.rs` for the TTL fix. Splitting it into a
+  separate commit would have been ceremony; the commit message
+  explicitly names the bonus fix so it's still searchable.
+
+## Follow-ups registered (new backlog items)
+
+- **#13**: ConflictDialog wiring for content-conflict reporting
+  (promoted from Sprint 17's `App.tsx:211` TODO — unchanged).
+- **#15**: Migrate `vba_bridge` to `-ArgumentList` / `param(...)`.
+  Denylist is a mitigation, not a design; ideally caller data never
+  reaches a `format!`-built script body.
+- **#16**: Image-name-based lock staleness (`QueryFullProcessImage
+  NameW` on Windows, `/proc/<pid>/comm` on Linux). Robust fix for
+  PID reuse; TTL is a fallback.
+- **#17**: HRESULT-based EXCEL_OPEN classification (locale-agnostic).
+  When landed, flip the Japanese-locale pinned negative test to
+  positive rather than deleting it.
+
+## Advisory to Sprint 19 planner
+
+Sprint 18 exited the Pause *and* delivered substantive fixes, but
+re-entering Pause is the default unless another product signal
+arrives. Three newly-surfaced follow-ups (#15, #16, #17) are all
+design-weight items that deserve explicit Planning rather than
+being absorbed into a silent refinement sprint. If the stakeholder
+channel is quiet, prefer Pause over a Sprint-15-style
+technical-exception pickup: **the exception does not generalize.**
+
 # Consolidated open follow-up backlog
 
 Deduplicated across Sprint 3–15. Closed items omitted (already applied
@@ -293,43 +348,38 @@ source and the external gate blocking execution.
 | 10  | Post-Sprint 15 bypass re-probe in Sprint 16+ checklist           | S15           | Planning-process update (Sprint 11 blind spot)    |
 | 11  | Sprint 16 default: re-run product / PBI escalation prompt        | S15           | Sprint 15 was one-time arc-completion exception   |
 | 12  | `App.tsx:211` ConflictDialog wiring for content-conflict reporting | S17         | Backend emits a content-conflict error-kind distinct from EXCEL_OPEN |
+| 13  | Alias of #12 (explicit registration during Sprint 18 security sweep)| S18         | Same as #12 — kept as a separate id only for planner cross-reference |
+| 14  | (reserved — placeholder retired by Sprint 18 bundling decision)    | S18         | n/a                                               |
+| 15  | Migrate `vba_bridge` to `-ArgumentList` / `param(...)`             | S18         | Re-architecture PBI (script body must not concatenate caller data) |
+| 16  | Image-name-based lock staleness (Windows + Linux)                  | S18         | Windows COM/Win32 + Linux procfs expertise on hand |
+| 17  | HRESULT-based EXCEL_OPEN classification (locale-agnostic)          | S18         | COM error-code extraction pathway (blocked on `vba_bridge` rewrite in #15) |
 
-## Intentional Pause (2026-04-21 以降)
+## Intentional Pause — 終了記録 (exited 2026-04-21 by Sprint 18)
 
-Sprint 12 / 13 / 14 / 17 の refinement-only と Sprint 15 の技術例外
-（`main.tsx` 非 null 断言除去 — arc completion 目的の one-time exception）
-により、product input 不在のサイクルが実質 5 連続に達した。Sprint 18
-以降について、巡回側の自動起動による silent probe / refinement-only
-cycle を**停止**する。Sprint 17 の Follow-ups で既に out-of-band
-product / backend 会話が推奨されており、本セクションはその推奨を
-「次サイクルをデフォルト起動しない」という**明示的な停止指示**に昇格
-させる durable signal である。
+2026-04-21 に入った Pause は、同日内に再開条件 (c)（stakeholder 明示的
+PBI 投入）により解除され、Sprint 18 として security 4 件に着地した。
+本セクションは Pause 自体の解除履歴を durable signal として保存する
+ためのもので、Sprint 19 以降で Pause を**再起動する場合**は新たな
+"Intentional Pause (N)" セクションを下に追加すること。前回 Pause の
+体裁を書き換えるのではなく、履歴として累積する。
 
-**再開条件**（いずれか 1 つが成立すれば Sprint 18 を正規起動）:
+**このPauseが機能した証拠**:
 
-- (a) backlog #1 — `TrustGuideDialog` が参照すべき Verde docs URL が
-  product 側で確定し、文言 / リンクが planner に伝達される。
-- (b) backlog #12 — backend が content-conflict を `EXCEL_OPEN` と
-  区別される error-kind として発出するようになり、`App.tsx:211` の
-  ConflictDialog wiring が Planning ピックアップ可能になる。
-- (c) 上記以外の新規 PBI が stakeholder から明示的に投入される
-  （rule-of-three / restructure PBI / UX 改善 など、種別問わず）。
+- Sprint 14 / 17 で蓄積された「silent refinement は product conversation
+  のトリガーであるべき」という advisory が、明示的な Pause 指示に
+  昇格した時点で stakeholder 側の行動を引き出した。
+- stakeholder からの投入内容が過去の catalogued backlog
+  （#1 / #8 / #9 等）ではなく、**どの probe set でも surface していなかった
+  外部 I/O 境界の脆弱性**だった — 「probe-only refinement は
+  新しい axis を見ない」という Sprint 17 の "orthogonal probe axis"
+  洞察を、最も強い形で実証した。
 
-**Pause 中にやらないこと**:
+**再発防止の教訓（次回 Pause 設計時に参照）**:
 
-- 同一 probe set の 5 回目の silent re-run。
-- Sprint 15 のような technical-exception Tidy の自己発見。arc completion
-  相当の明確な正当化がない限り、planner 自発の code change は追加しない。
-- 本 Pause セクションの書き換えによる条件緩和。再開条件は stakeholder
-  側からの signal で解除されるべきもので、planner 側での再解釈で解除
-  してはならない。
-
-**Pause 中にやること（再開前提の小作業のみ）**:
-
-- 新規 commit / issue / PR が `main` に到着した際に、(a)(b)(c) のいずれか
-  に該当するか判定し、該当すれば Sprint 18 Planning に移行。
-- 再開条件を満たす signal が到着しないまま十分な時間が経過した場合、
-  Pause そのものを「backlog bankruptcy が近い」という escalation signal
-  として product チャネルに再提示することは可（ただしこれも Pause を
-  planner 単独で解除する手段ではない）。
+- Pause 中に planner 単独で実行できるのは依然として「新規 signal の
+  到着判定」のみ。条件解釈は planner 側で緩めない。Sprint 18 の exit も
+  stakeholder 側の明示的な指示による。
+- **Pause が有効だったのは期間が短かったから**ではなく、「silent probe
+  を禁じる」ルールを明示していたから。次に Pause に入る場合もこの
+  構造を維持すること（期間は成り行き、条件は厳格）。
 
