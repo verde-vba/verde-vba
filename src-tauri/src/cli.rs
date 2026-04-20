@@ -65,8 +65,21 @@ enum CliSubcommand {
 #[derive(Debug, Args)]
 struct ServeArgs {
     /// Absolute path to the `.xlsm` workbook to serve.
-    #[arg(short = 'p', long = "project")]
+    #[arg(short = 'p', long = "project", value_parser = non_empty_project)]
     project: String,
+}
+
+/// clap value parser that rejects an empty `--project` value up front.
+///
+/// Without this, clap's default `String` parser happily accepts `""`,
+/// which would propagate to `VERDE_PROJECT=""` and surface as a confusing
+/// downstream failure from the MCP server.
+fn non_empty_project(s: &str) -> Result<String, String> {
+    if s.is_empty() {
+        Err("--project must not be empty".to_string())
+    } else {
+        Ok(s.to_string())
+    }
 }
 
 /// Parse CLI arguments (excluding argv[0]) into a [`CliCommand`].
@@ -280,5 +293,16 @@ mod tests {
     fn parse_args_serve_rejects_unknown_flag() {
         let args = v(&["serve", "--weird"]);
         assert!(parse_args(&args).is_err());
+    }
+
+    #[test]
+    fn parse_args_serve_rejects_empty_project() {
+        // An empty --project value would cause the MCP server to spawn with
+        // VERDE_PROJECT="", failing downstream with a confusing error. The
+        // CLI should reject it up front and mention the offending flag so
+        // the user can fix their invocation.
+        let args = v(&["serve", "--project", ""]);
+        let err = parse_args(&args).expect_err("empty --project should be rejected");
+        assert!(err.contains("--project"), "message was: {err}");
     }
 }
