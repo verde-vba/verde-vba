@@ -149,12 +149,6 @@ impl LockManager {
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
 
-    /// Hostname of the current machine, used by the command layer to compare
-    /// against a lock's recorded `machine` field for stale-lock detection.
-    pub(crate) fn current_machine_name() -> String {
-        Self::machine_name()
-    }
-
     /// Returns `true` iff the lock should be treated as stale (safe to
     /// overwrite / ignore). Combines machine-local PID liveness with a
     /// TTL fallback to survive Windows PID reuse after a Verde crash.
