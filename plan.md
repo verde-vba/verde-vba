@@ -354,6 +354,79 @@ source and the external gate blocking execution.
 | 16  | Image-name-based lock staleness (Windows + Linux)                  | S18         | Windows COM/Win32 + Linux procfs expertise on hand |
 | 17  | HRESULT-based EXCEL_OPEN classification (locale-agnostic)          | S18         | COM error-code extraction pathway (blocked on `vba_bridge` rewrite in #15) |
 
+## Sprint 19 (2026-04-21) — App.tsx 責務分割
+
+### Goal
+
+App.tsx (352 LOC) をシングルオーナーな hook 群へ責務分割する。
+frontend 32/32 test を safety net として TDD サイクルで各 extraction を実施。
+behavioral change ゼロ — 構造変更のみ。
+
+### 候補 split (3–5)
+
+**C1 — `useErrorRouting` hook**
+- 抽出対象: `routeParsedError`, `handleCaughtBackendError`, `errorBanner` state
+- 境界: `ParsedError` → UI surface への dispatch logic。render tree への依存なし
+- テスト軸: `routeParsedError` の exhaustive switch, `locked` drop, `excelOpen` / generic
+  routing を hook-level で pin
+- 優先度: **最高**。他 hook (`useOpenFile`, `useSave`) が `handleCaughtBackendError`
+  を参照するため先行抽出が依存解消になる
+
+**C2 — `useModuleTabs` hook**
+- 抽出対象: `openModules` state, `handleSelectModule`, `handleCloseModule`
+- 境界: "開いているタブ一覧 + アクティブモジュール遷移" の完結した state machine
+- テスト軸: open/close/active-transition の各パスを hook-level unit test で pin
+- 優先度: **高**。C1 と独立して抽出可能
+
+**C3 — `useOpenFile` hook**
+- 抽出対象: `lockPrompt` state, `excelOpenPrompt` state (部分),
+  `handleOpenFile`, `handleForceOpen`, `handleOpenReadOnly`, `handleLockCancel`
+- 境界: "Tauri dialog → project open → ロック競合 UI へ routing" の flow
+- テスト軸: `handleForceOpen` の early-return (lockPrompt null), ロック競合 routing
+- 優先度: **中**。C1 完了後に抽出 (`handleCaughtBackendError` を C1 から受け取る shape)
+
+**C4 — `useSave` hook**
+- 抽出対象: `saveBlockedPrompt` state, `handleSave`
+- 境界: "saveModule → 成功/SAVE_BLOCKED_READONLY/backend error の 3-way dispatch"
+- テスト軸: sentinel path (`SAVE_BLOCKED_READONLY`), success clear, error routing
+- 優先度: **中**。C1 完了後に抽出
+
+**C5 — ReadOnly WarningBar (optional component extraction)**
+- 抽出対象: App.tsx:234–248 の `readOnly` banner JSX
+- 境界: 単純な presentational strip。hook ではなく component 抽出
+- テスト軸: `role="status"` render / non-render を snapshot で pin
+- 優先度: **低**。C1–C4 完了後の仕上げとして検討。スコープ超過なら次 sprint に送る
+
+### 実装順序
+
+```
+C1 (useErrorRouting) → C2 (useModuleTabs) 並行可
+C3 (useOpenFile)     → C1 完了後
+C4 (useSave)         → C1 完了後
+C5                   → C1–C4 完了後、スコープ超過なら defer
+```
+
+各抽出ステップ: RED (hook contract test) → GREEN (抽出) → REFACTOR (App.tsx 整理)
+commit 単位: 1 extraction = 1 commit (hook file + App.tsx diff + test)
+
+### 受け入れ基準 (達成)
+
+- `bun run test` 62/62 緑 (既存 32 → 新規 30 hook-level tests 追加)
+- `bun run tsc --noEmit` クリーン
+- App.tsx LOC: 352 → 229 (35% 削減; レンダーツリー合成に集中)
+- `cargo test --lib` 55 緑 (backend 無変更確認)
+
+### 変更コミット
+
+| Commit  | 内容                                      |
+| ------- | ----------------------------------------- |
+| 072b44b | C1: `useErrorRouting` (+7 tests)          |
+| 352d74c | C2: `useModuleTabs` (+7 tests; stale-closure fix) |
+| 702e7fa | C3: `useOpenFile` (+9 tests)              |
+| 19d7d5a | C4: `useSave` (+7 tests)                  |
+
+C5 (ReadOnly WarningBar component) はスコープ超過のため defer。
+
 ## Intentional Pause — 終了記録 (exited 2026-04-21 by Sprint 18)
 
 2026-04-21 に入った Pause は、同日内に再開条件 (c)（stakeholder 明示的
