@@ -54,6 +54,7 @@ vi.mock("./components/Editor", () => ({
 }));
 
 import App from "./App";
+import { open as openDialogMock } from "@tauri-apps/plugin-dialog";
 import { initI18n } from "./hooks/useLocale";
 
 // App relies on react-i18next being initialized (done in main.tsx in prod).
@@ -225,5 +226,45 @@ describe("App save blocked", () => {
     expect(
       within(banner).getByRole("button", { name: "Dismiss" })
     ).toBeInTheDocument();
+  });
+});
+
+describe("App file dialog", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    // The plugin-dialog mock is module-scoped (vi.mock hoisted above the
+    // imports) so `openDialogMock` is the same vi.fn across tests — reset
+    // its call history so the assertion below sees only this test's call.
+    vi.mocked(openDialogMock).mockClear();
+  });
+
+  it("passes the localized Excel filter name to the plugin-dialog open call", async () => {
+    // Phase 2 swapped the hardcoded "Excel Macro" filter name for
+    // t("common.fileTypeExcelMacro"). Characterize that wiring at the
+    // dialog-call site: the filters[0].name propagated through the dynamic
+    // import must equal the en.json value, and the extension stays "xlsm".
+    // Asserting against the English string (not the i18n key) proves the
+    // t(...) call resolved through react-i18next rather than echoing the key.
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(defaultSettingsResponse);
+      // open_project won't be reached because the mocked open() returns null
+      // below — but stub it defensively so an unexpected call surfaces clearly.
+      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+    });
+    // Returning null short-circuits handleOpenFile after the dialog call,
+    // so we only observe the filter args without needing backend plumbing.
+    vi.mocked(openDialogMock).mockResolvedValueOnce(null);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open .xlsm" }));
+
+    await waitFor(() => {
+      expect(openDialogMock).toHaveBeenCalled();
+    });
+    const callArg = vi.mocked(openDialogMock).mock.calls[0][0] as {
+      filters: { name: string; extensions: string[] }[];
+    };
+    expect(callArg.filters[0].name).toBe("Excel Macro");
+    expect(callArg.filters[0].extensions[0]).toBe("xlsm");
   });
 });
