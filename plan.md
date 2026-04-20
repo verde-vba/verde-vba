@@ -451,3 +451,94 @@ there to appease the narrower type.
   current three mutation hooks.
 - **Structured logging for `checkConflict`** — still outstanding;
   Sprint 6 gated on telemetry.
+
+# Sprint 8 — `SAVE_BLOCKED_READONLY` sentinel characterization
+
+## Goal
+
+Close the characterization gap around the `SAVE_BLOCKED_READONLY`
+sentinel: an exact-string contract declared in `useVerdeProject.ts`
+and consumed in `App.tsx`, with a comment explicitly calling out
+"changing the value is a coordinated UI change" — yet zero tests
+pinned either side of the coupling before this sprint.
+
+## Scope
+
+- **Sole item**: add one hook-level characterization test that pins
+  three invariants on a read-only save attempt:
+  1. the throw is an `Error` instance (not a bare string)
+  2. `e.message` is exactly `"SAVE_BLOCKED_READONLY"`
+  3. the short-circuit fires *before* any backend invoke
+- Also pin the sentinel literal itself so a rename of the constant
+  without a coordinated `App.tsx` update fails this test.
+- Intentionally **no** production-code changes. Sprint 8 is a
+  regression-gate installation, not a behavior change.
+- Out of scope for this sprint: an App-side (UI-consumer) test
+  that walks the saveBlocked banner render path. That needs the
+  openProjectReadOnly flow stubbed through App's dynamic-import
+  chain, which is a wider test scaffold than a single sprint item.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type        | Summary                                                                       |
+| ------- | ----------- | ----------------------------------------------------------------------------- |
+| 77f3259 | test(hooks) | Pin SAVE_BLOCKED_READONLY sentinel contract across read-only save attempts   |
+| (this)  | docs        | Record Sprint 8 plan and outcomes                                             |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **31** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 8)
+
+## Key decisions
+
+- **Hook side pinned, UI side deferred**: the throw end of the
+  contract is 1 short-circuit in 1 function; the consumer end lives
+  inside App.tsx's catch-site routing with a three-layer dialog/
+  banner fallback. Pinning the thrower first catches the majority of
+  drift risk (the constant moves, the wrapper disappears) with one
+  compact test; the consumer side can come later as a wider App
+  integration test when the scaffolding justifies it.
+- **Four assertions over one**: the test could have stopped at
+  `rejects.toThrowError(new Error(SAVE_BLOCKED_READONLY))` but that
+  alone does not catch a regression where the guard moves below the
+  backend invoke (side-effect executed, then throw). Checking
+  `invokeMock.mock.calls.length` before/after the save isolates that
+  invariant. Pinning the literal itself (`expect(SAVE_BLOCKED_READONLY).toBe("SAVE_BLOCKED_READONLY")`)
+  catches constant-rename drift even when the thrower-side plumbing
+  stays correct.
+- **Discovered coupling fault during writing**: the test initially
+  used `"open_project_read_only"` in the mock dispatch, but the
+  actual Tauri command name is `open_project_readonly` (no
+  underscore between `read` and `only`). The mismatch was caught
+  because the test exercises the real `tauri-commands.ts` wrapper,
+  not a stubbed hook. Finding this via a RED that was not
+  about-the-sentinel is exactly the kind of side benefit a
+  characterization test delivers — and a good argument for why the
+  probe-then-test discipline should not skip the test-run step.
+- **Sprint 8 was intentionally single-item, again**: the remaining
+  Sprint 6/7 follow-ups are either blocked on external input
+  (product / telemetry) or are test-file Tidies worth less than
+  closing a real contract gap. One focused characterization beats
+  several mechanical swaps.
+
+## Follow-ups (out of Sprint 8 scope)
+
+- **App.tsx consumer-side test for the saveBlocked banner path** —
+  requires stubbing the openProjectReadOnly flow through the dynamic
+  `plugin-dialog` import plus the Editor save-trigger, a wider
+  scaffold than a single-item sprint. Candidate for Sprint 9.
+- **Residual `key!` force-cast in `error-parse.test.ts:174`** —
+  narrow the `key: string | undefined` via an explicit guard so the
+  test file stops carrying the same "paper over the signature"
+  antipattern Sprint 7 removed from the hook. Tiny Tidy candidate.
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding; blocked on Verde-owned docs page decision.
+- **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
+  prefix, `"VBA"` language tag, `WelcomeScreen.tsx` `"Verde"` brand
+  headline) — still outstanding; each needs a product decision.
+- **Optional: `withLoadingState` helper** — still outstanding;
+  Sprint 4 rejected it pending rule-of-three evidence.
+- **Structured logging for `checkConflict`** — still outstanding;
+  Sprint 6 gated on telemetry.
