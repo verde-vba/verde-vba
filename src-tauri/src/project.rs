@@ -197,6 +197,13 @@ impl ProjectManager {
     /// recovery) are intentionally deferred to the TDD loop in Phase 3.
     pub async fn sync_to_excel(&self, project_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let project_dir = Self::project_dir(project_id);
+        // Surface a stable "project not found" substring when the meta file
+        // is absent so the frontend / MCP can pattern-match on it (mirrors
+        // the EXCEL_OPEN_MARKER convention). Other I/O errors from read_meta
+        // — permissions, corrupt JSON, etc. — still bubble up unchanged.
+        if !Self::meta_path(project_id).exists() {
+            return Err(format!("project not found: {project_id}").into());
+        }
         // Pull xlsm_path out of meta and drop the meta before crossing any
         // .await — `Box<dyn Error>` is !Send and would poison the future.
         let xlsm_path = Self::read_meta(project_id)?.xlsm_path;
@@ -445,5 +452,48 @@ mod tests {
         let b = ProjectManager::project_id_from_path("C:/foo/bar.xlsm");
         assert_eq!(a, b);
         assert_eq!(a.len(), 16);
+    }
+
+    /// Drive a Future to completion on the current thread without pulling
+    /// in tokio. Safe here because sync_to_excel returns Ready(Err(..))
+    /// synchronously when meta is missing — no real awaiting happens.
+    fn block_on<F: std::future::Future>(mut fut: F) -> F::Output {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        const VTABLE: RawWakerVTable = RawWakerVTable::new(
+            |_| RawWaker::new(std::ptr::null(), &VTABLE),
+            |_| {},
+            |_| {},
+            |_| {},
+        );
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let mut cx = Context::from_waker(&waker);
+        let mut fut = unsafe { Pin::new_unchecked(&mut fut) };
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    #[test]
+    fn sync_to_excel_returns_project_not_found_when_meta_missing() {
+        // Use a project_id that cannot exist in AppData: guarantee the
+        // resolved dir is clean before we call sync_to_excel. project_dir
+        // resolves via APPDATA/HOME env — we simply remove any leftover.
+        let project_id = format!("missing_{}_{}", std::process::id(), "meta");
+        let dir = ProjectManager::project_dir(&project_id);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let manager = ProjectManager::new();
+        let result = block_on(manager.sync_to_excel(&project_id));
+
+        assert!(result.is_err(), "expected Err when .verde-meta.json missing");
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.to_lowercase().contains("project not found"),
+            "error message must contain 'project not found' (stable substring \
+             for frontend pattern-matching), got: {msg}"
+        );
     }
 }
