@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::conflict::{detect_conflicts, ConflictModule};
 use crate::settings::Settings;
 use crate::vba_bridge::VbaBridge;
 
@@ -224,6 +225,149 @@ impl ProjectManager {
             modules: meta.modules.into_values().collect(),
         })
     }
+
+    /// Collect `filename -> sha256(content)` for every regular file directly
+    /// under `dir`. Skips the meta file and any dotfiles. Module filenames
+    /// preserve their extension (.bas/.cls/.frm) to match meta keys.
+    fn hash_files_in_dir(
+        dir: &Path,
+    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+        let mut out = HashMap::new();
+        if !dir.exists() {
+            return Ok(out);
+        }
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let ft = entry.file_type()?;
+            if !ft.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path())?;
+            let content = String::from_utf8_lossy(&bytes);
+            out.insert(name, Self::content_hash(&content));
+        }
+        Ok(out)
+    }
+
+    /// RAII wrapper that removes a temp directory on drop, even if the
+    /// containing function panics or returns early. We avoid pulling in the
+    /// `tempfile` crate just for this one call site.
+    fn make_temp_dir(tag: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let base = std::env::temp_dir().join(format!(
+            "verde_conflict_{}_{}",
+            tag,
+            std::process::id()
+        ));
+        // Clear any leftover from a previous crashed run so the new export
+        // starts from a clean slate.
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base)?;
+        Ok(base)
+    }
+
+    /// Three-way conflict detection (PLANS §254-257). Compares the hashes
+    /// of AppData files, `.verde-meta.json`, and a live Excel export.
+    ///
+    /// Errors out on non-Windows or when Excel is not installed because the
+    /// COM export step is unavailable — callers should treat this as
+    /// "cannot check, skip" rather than "no conflict".
+    pub async fn check_conflict(
+        &self,
+        project_id: &str,
+        xlsm_path: &str,
+    ) -> Result<Vec<ConflictModule>, Box<dyn std::error::Error>> {
+        let project_dir = Self::project_dir(project_id);
+        let file_hashes = Self::hash_files_in_dir(&project_dir)?;
+
+        let meta_hashes: HashMap<String, String> = if Self::meta_path(project_id).exists() {
+            Self::read_meta(project_id)?
+                .modules
+                .into_iter()
+                .map(|(k, v)| (k, v.hash))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
+        let temp_dir = Self::make_temp_dir(project_id)?;
+        let export_result =
+            VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
+        let excel_hashes = match export_result {
+            Ok(_filenames) => Self::hash_files_in_dir(&temp_dir)?,
+            Err(e) => {
+                // Always best-effort cleanup before propagating.
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                return Err(e);
+            }
+        };
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        Ok(detect_conflicts(&file_hashes, &meta_hashes, &excel_hashes))
+    }
+
+    /// Resolve a detected conflict by forcing one side to win.
+    ///
+    /// - `side == "verde"`: push every AppData module into Excel via
+    ///   `VbaBridge::import`, overwriting the workbook's VBA project.
+    /// - `side == "excel"`: re-export from Excel and overwrite AppData files
+    ///   and the meta-file hashes accordingly.
+    pub async fn resolve_conflict(
+        &self,
+        project_id: &str,
+        xlsm_path: &str,
+        side: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let project_dir = Self::project_dir(project_id);
+
+        match side {
+            "verde" => {
+                // Walk the AppData dir and push each module into Excel.
+                if !project_dir.exists() {
+                    return Err("Project directory not found".into());
+                }
+                let source_dir = project_dir.to_string_lossy().to_string();
+                for entry in std::fs::read_dir(&project_dir)? {
+                    let entry = entry?;
+                    if !entry.file_type()?.is_file() {
+                        continue;
+                    }
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    VbaBridge::import(xlsm_path, &source_dir, &name)
+                        .await
+                        .map_err(Self::classify_import_error)?;
+                    let bytes = std::fs::read(entry.path())?;
+                    let content = String::from_utf8_lossy(&bytes).into_owned();
+                    Self::update_module_hash(project_id, &name, &content)?;
+                }
+                Ok(())
+            }
+            "excel" => {
+                // Freshly export Excel -> AppData, clobbering local edits,
+                // then refresh meta hashes so a subsequent check is clean.
+                std::fs::create_dir_all(&project_dir)?;
+                let exported =
+                    VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
+                for filename in exported {
+                    let path = project_dir.join(&filename);
+                    if !path.exists() {
+                        continue;
+                    }
+                    let bytes = std::fs::read(&path)?;
+                    let content = String::from_utf8_lossy(&bytes).into_owned();
+                    Self::update_module_hash(project_id, &filename, &content)?;
+                }
+                Ok(())
+            }
+            other => Err(format!("Invalid side: must be 'verde' or 'excel', got '{other}'").into()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +387,44 @@ mod tests {
         let a = ProjectManager::content_hash("a");
         let b = ProjectManager::content_hash("b");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn hash_files_in_dir_hashes_every_non_dotfile() {
+        let tmp = std::env::temp_dir().join(format!(
+            "verde_hash_files_{}_{}",
+            std::process::id(),
+            "a"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("A.bas"), "Sub Foo()\nEnd Sub\n").unwrap();
+        std::fs::write(tmp.join("B.cls"), "Option Explicit\n").unwrap();
+        std::fs::write(tmp.join(".verde-meta.json"), "{}").unwrap();
+
+        let got = ProjectManager::hash_files_in_dir(&tmp).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(got.len(), 2, "dotfiles must be excluded");
+        assert_eq!(
+            got.get("A.bas").unwrap(),
+            &ProjectManager::content_hash("Sub Foo()\nEnd Sub\n")
+        );
+        assert_eq!(
+            got.get("B.cls").unwrap(),
+            &ProjectManager::content_hash("Option Explicit\n")
+        );
+    }
+
+    #[test]
+    fn hash_files_in_dir_returns_empty_when_dir_missing() {
+        let missing = std::env::temp_dir().join(format!(
+            "verde_hash_files_missing_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&missing);
+        let got = ProjectManager::hash_files_in_dir(&missing).unwrap();
+        assert!(got.is_empty());
     }
 
     #[test]
