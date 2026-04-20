@@ -129,18 +129,44 @@ impl ProjectManager {
         Self::write_meta(project_id, &meta)
     }
 
-    /// Classify an import failure. Any error whose stderr/message suggests the
-    /// workbook is currently open in Excel is re-wrapped with the EXCEL_OPEN
-    /// marker so the UI can branch on it.
+    /// Substrings (case-insensitive) that identify an import failure as
+    /// "Excel has the workbook open". Extracted from `classify_import_error`
+    /// in Sprint 18 / PBI #4 so the fragile magic strings are greppable and
+    /// one-doc-comment away from the i18n limitation they imply.
+    ///
+    /// **Known limitation**: these strings are the English-locale wording of
+    /// PowerShell / COM exceptions. On a Japanese-locale Excel the message
+    /// becomes e.g. "別のプロセスで使用されているため" and this list misses
+    /// it entirely — the UI will then see a generic error instead of the
+    /// EXCEL_OPEN-prefixed one that triggers the "close Excel and retry"
+    /// dialog. Follow-up #17 tracks the robust fix: branch on COM HRESULT
+    /// (`0x80070020` / `ERROR_SHARING_VIOLATION`) which is locale-agnostic.
+    /// Until then, non-English locales will get the raw error text.
+    const EXCEL_OPEN_SUBSTRINGS: &[&str] = &[
+        "being used by another process",
+        "another user",
+        "is locked",
+        "currently in use",
+        "already open",
+    ];
+
+    /// Pure classification: returns `Some(msg)` if `err_msg` matches any
+    /// known "Excel holds the workbook" substring, `None` otherwise.
+    /// Extracted for direct unit testing without constructing real errors.
+    pub(crate) fn is_excel_open_error(err_msg: &str) -> bool {
+        let lower = err_msg.to_lowercase();
+        Self::EXCEL_OPEN_SUBSTRINGS
+            .iter()
+            .any(|needle| lower.contains(needle))
+    }
+
+    /// Classify an import failure. Any error whose stderr/message matches a
+    /// known EXCEL_OPEN substring is re-wrapped with the EXCEL_OPEN marker
+    /// so the UI can branch on it. Non-matching errors pass through
+    /// unchanged.
     fn classify_import_error(err: Box<dyn std::error::Error>) -> Box<dyn std::error::Error> {
         let msg = err.to_string();
-        let lower = msg.to_lowercase();
-        let excel_open = lower.contains("being used by another process")
-            || lower.contains("another user")
-            || lower.contains("is locked")
-            || lower.contains("currently in use")
-            || lower.contains("already open");
-        if excel_open {
+        if Self::is_excel_open_error(&msg) {
             format!(
                 "{}: Excel appears to have the workbook open. Close it and retry. ({})",
                 EXCEL_OPEN_MARKER, msg
@@ -456,6 +482,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(&missing);
         let got = ProjectManager::hash_files_in_dir(&missing).unwrap();
         assert!(got.is_empty());
+    }
+
+    // --- Sprint 18 / PBI #4: is_excel_open_error ---
+
+    #[test]
+    fn is_excel_open_error_matches_each_known_english_substring() {
+        // Pin every substring individually so a future edit that deletes
+        // one without deleting its matching test is caught immediately.
+        assert!(ProjectManager::is_excel_open_error(
+            "file is being used by another process"
+        ));
+        assert!(ProjectManager::is_excel_open_error(
+            "locked for editing by another user"
+        ));
+        assert!(ProjectManager::is_excel_open_error(
+            "the workbook is locked"
+        ));
+        assert!(ProjectManager::is_excel_open_error(
+            "resource currently in use"
+        ));
+        assert!(ProjectManager::is_excel_open_error(
+            "the file is already open"
+        ));
+    }
+
+    #[test]
+    fn is_excel_open_error_case_insensitive() {
+        assert!(ProjectManager::is_excel_open_error(
+            "FILE IS BEING USED BY ANOTHER PROCESS"
+        ));
+        assert!(ProjectManager::is_excel_open_error(
+            "AnOtHeR UsEr holds this workbook"
+        ));
+    }
+
+    #[test]
+    fn is_excel_open_error_rejects_unrelated_errors() {
+        assert!(!ProjectManager::is_excel_open_error(
+            "VBA bridge requires Windows with Excel installed"
+        ));
+        assert!(!ProjectManager::is_excel_open_error(
+            "Module1.bas: syntax error at line 3"
+        ));
+        assert!(!ProjectManager::is_excel_open_error(""));
+    }
+
+    #[test]
+    fn is_excel_open_error_documents_known_japanese_locale_miss() {
+        // Known limitation pinned (Sprint 18 / PBI #4): on a Japanese
+        // Windows the COM/PS error reads "別のプロセスで使用されているため..."
+        // which none of the EXCEL_OPEN_SUBSTRINGS catch. This test SHOULD
+        // flip to `true` when follow-up #17 (HRESULT-based classification)
+        // lands — at which point the test must be updated to pin the new
+        // behavior, not deleted. Deleting it would erase the institutional
+        // memory of which message format the classifier learned to handle.
+        let ja = "ファイル 'sales.xlsm' は別のプロセスで使用されているため、アクセスできません。";
+        assert!(
+            !ProjectManager::is_excel_open_error(ja),
+            "EXPECTED failure today: Japanese-locale error unmatched. \
+             When follow-up #17 lands, update this assertion and the \
+             docs on EXCEL_OPEN_SUBSTRINGS rather than removing the test."
+        );
     }
 
     #[test]
