@@ -11,7 +11,7 @@ import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useTheme } from "./hooks/useTheme";
 import { useTrust } from "./hooks/useTrust";
 import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./hooks/useVerdeProject";
-import { parseBackendError } from "./lib/error-parse";
+import { type ParsedError, parseBackendError, toI18nKey } from "./lib/error-parse";
 import type { ModuleInfo } from "./lib/types";
 
 interface LockPrompt {
@@ -45,6 +45,33 @@ function App() {
   const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(
     null
   );
+  const [errorBanner, setErrorBanner] = useState<ParsedError | null>(null);
+
+  // Routes a ParsedError variant to the appropriate UI surface. Kept as a
+  // single function so the exhaustive `never` default forces every future
+  // ParsedError kind to be handled in one place rather than scattered across
+  // catch sites.
+  const routeParsedError = useCallback((parsed: ParsedError) => {
+    switch (parsed.kind) {
+      case "locked":
+        // `locked` is contextual (it needs the xlsmPath in scope) so it is
+        // handled inline at its single call site rather than here.
+        setErrorBanner(parsed);
+        return;
+      case "excelOpen":
+        setExcelOpenPrompt(parsed.detail);
+        return;
+      case "projectNotFound":
+      case "projectCorrupted":
+      case "generic":
+        setErrorBanner(parsed);
+        return;
+      default: {
+        const _exhaustive: never = parsed;
+        return _exhaustive;
+      }
+    }
+  }, []);
 
   const handleOpenFile = useCallback(async () => {
     try {
@@ -66,14 +93,14 @@ function App() {
             time: parsed.time,
           });
         } else {
-          console.error("Failed to open project:", parsed);
+          routeParsedError(parsed);
         }
       }
     } catch {
       // Dev mode fallback (plugin-dialog only available inside Tauri runtime)
       console.log("File dialog not available outside Tauri");
     }
-  }, [openProject]);
+  }, [openProject, routeParsedError]);
 
   const handleForceOpen = useCallback(async () => {
     if (!lockPrompt) return;
@@ -82,9 +109,9 @@ function App() {
     try {
       await forceOpenProject(xlsmPath);
     } catch (e) {
-      console.error("Force open failed:", parseBackendError(e));
+      routeParsedError(parseBackendError(e));
     }
-  }, [lockPrompt, forceOpenProject]);
+  }, [lockPrompt, forceOpenProject, routeParsedError]);
 
   const handleOpenReadOnly = useCallback(async () => {
     if (!lockPrompt) return;
@@ -93,9 +120,9 @@ function App() {
     try {
       await openProjectReadOnly(xlsmPath);
     } catch (e) {
-      console.error("Read-only open failed:", parseBackendError(e));
+      routeParsedError(parseBackendError(e));
     }
-  }, [lockPrompt, openProjectReadOnly]);
+  }, [lockPrompt, openProjectReadOnly, routeParsedError]);
 
   const handleLockCancel = useCallback(() => {
     setLockPrompt(null);
@@ -160,18 +187,13 @@ function App() {
           setSaveBlockedPrompt(t("status.saveBlocked"));
           return;
         }
-        const parsed = parseBackendError(e);
-        if (parsed.kind === "excelOpen") {
-          setExcelOpenPrompt(parsed.detail);
-        } else {
-          console.error("Save failed:", parsed);
-        }
+        routeParsedError(parseBackendError(e));
       }
       // TODO: wire ConflictDialog here once the backend reports
       // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
       // is a save-time lock condition rather than a content conflict).
     },
-    [activeModule, saveModule, t]
+    [activeModule, saveModule, t, routeParsedError]
   );
 
   return (
@@ -228,6 +250,54 @@ function App() {
           )}
         </div>
       </div>
+
+      {errorBanner &&
+        (() => {
+          const key = toI18nKey(errorBanner);
+          const title = key ? t(`${key}.title`) : undefined;
+          const message =
+            key
+              ? t(`${key}.message`)
+              : errorBanner.kind === "generic"
+                ? errorBanner.message
+                : "";
+          return (
+            <div
+              role="alert"
+              style={{
+                padding: "8px 12px",
+                background: "var(--error, #b00020)",
+                color: "var(--bg-primary, #ffffff)",
+                borderTop: "1px solid var(--border)",
+                fontSize: "12px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              <span>
+                {title ? <strong>{title}: </strong> : null}
+                {message}
+              </span>
+              <button
+                type="button"
+                onClick={() => setErrorBanner(null)}
+                style={{
+                  padding: "2px 10px",
+                  background: "transparent",
+                  color: "inherit",
+                  border: "1px solid currentColor",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                {t("common.dismiss")}
+              </button>
+            </div>
+          );
+        })()}
 
       {saveBlockedPrompt && (
         <div
