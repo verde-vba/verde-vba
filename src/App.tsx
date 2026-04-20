@@ -186,7 +186,7 @@ function App() {
         const remaining = openModules.filter(
           (m) => m.filename !== mod.filename
         );
-        setActiveModule(remaining[remaining.length - 1] ?? null!);
+        setActiveModule(remaining[remaining.length - 1] ?? null);
       }
     },
     [activeModule, openModules, setActiveModule]
