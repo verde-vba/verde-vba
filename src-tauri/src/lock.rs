@@ -401,6 +401,41 @@ mod tests {
         Some("explorer.exe".to_string())
     }
 
+    #[cfg(target_os = "macos")]
+    fn unavailable_provider(_pid: u32) -> Option<String> {
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn is_stale_macos_fallback_respects_ttl() {
+        // Sprint 27 commit 5 durable pin: provider `None` on macOS means
+        // "cannot verify" and MUST fall back to TTL. If a future planner
+        // wires a native macOS API and this test starts failing, they
+        // must revisit the cfg-gated `None` invariant (Sprint 26 Key
+        // decision) before "fixing" the test.
+        let recent = LockInfo {
+            user: "me".to_string(),
+            machine: LockManager::machine_name(),
+            pid: std::process::id(),
+            app: "Verde".to_string(),
+            locked_at: Utc::now().to_rfc3339(),
+        };
+        assert!(
+            !LockManager::is_stale_with_provider(&recent, unavailable_provider, Utc::now()),
+            "macOS fallback: alive same-machine PID within TTL with provider=None must NOT be stale"
+        );
+
+        let ancient = LockInfo {
+            locked_at: (Utc::now() - Duration::days(30)).to_rfc3339(),
+            ..recent
+        };
+        assert!(
+            LockManager::is_stale_with_provider(&ancient, unavailable_provider, Utc::now()),
+            "macOS fallback: TTL-expired lock with provider=None must be reaped"
+        );
+    }
+
     #[test]
     fn is_stale_reaps_same_machine_alive_pid_with_foreign_image() {
         // Sprint 26 durable pinned-negative signal, newly authored (no RED
