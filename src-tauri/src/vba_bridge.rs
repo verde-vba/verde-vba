@@ -139,3 +139,63 @@ try {{
         Err("VBA bridge requires Windows with Excel installed".into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // Characterization tests: pin the non-Windows error contract so refactors to the Windows COM bridge cannot silently drift the cross-platform surface.
+    use super::*;
+
+    /// Drive a Future to completion on the current thread without pulling
+    /// in tokio (not a workspace dep). Adequate here because the
+    /// non-Windows branches return `Ready(Err(..))` synchronously —
+    /// no real awaiting happens. Mirrors the helper in commands.rs.
+    #[cfg(not(target_os = "windows"))]
+    fn block_on<F: std::future::Future>(mut fut: F) -> F::Output {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        const VTABLE: RawWakerVTable = RawWakerVTable::new(
+            |_| RawWaker::new(std::ptr::null(), &VTABLE),
+            |_| {},
+            |_| {},
+            |_| {},
+        );
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let mut cx = Context::from_waker(&waker);
+        // Safety: fut is owned by this stack frame and never moved after
+        // pinning here.
+        let mut fut = unsafe { Pin::new_unchecked(&mut fut) };
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn export_on_non_windows_returns_error_mentioning_windows_requirement() {
+        let result = block_on(VbaBridge::export("dummy.xlsm", "/tmp/ignored"));
+        let err = result.expect_err("non-Windows export must return Err");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("VBA bridge requires Windows"),
+            "error message should pin the Windows-requirement contract, got: {msg}"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn import_on_non_windows_returns_error_mentioning_windows_requirement() {
+        let result = block_on(VbaBridge::import(
+            "dummy.xlsm",
+            "/tmp/ignored",
+            "Module1.bas",
+        ));
+        let err = result.expect_err("non-Windows import must return Err");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("VBA bridge requires Windows"),
+            "error message should pin the Windows-requirement contract, got: {msg}"
+        );
+    }
+}
