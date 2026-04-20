@@ -4,6 +4,7 @@ import { Banner } from "./components/Banner";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { Editor } from "./components/Editor";
 import { LockDialog } from "./components/LockDialog";
+import { ReadOnlyBar } from "./components/ReadOnlyBar";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
@@ -107,21 +108,7 @@ function App() {
         >
           {project ? (
             <>
-              {readOnly && (
-                <div
-                  role="status"
-                  style={{
-                    padding: "4px 12px",
-                    background: "var(--warning-bg, #fff4e5)",
-                    color: "var(--warning-text, #7a4b00)",
-                    borderBottom: "1px solid var(--border)",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                  }}
-                >
-                  {t("status.readOnly")}
-                </div>
-              )}
+              {readOnly && <ReadOnlyBar />}
               <TabBar
                 openModules={openModules}
                 activeModule={activeModule}

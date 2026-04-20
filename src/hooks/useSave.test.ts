@@ -9,12 +9,12 @@ const SAVE_BLOCKED_READONLY = "SAVE_BLOCKED_READONLY";
 
 function makeOptions(overrides: Partial<Parameters<typeof useSave>[0]> = {}) {
   return {
-    activeModule: mod1 as ModuleInfo | null,
+    activeModule: mod1,
     saveModule: vi.fn(async () => {}),
     setExcelOpenPrompt: vi.fn() as (s: string | null) => void,
     handleCaughtBackendError: vi.fn() as (e: unknown, path: string | null) => void,
     saveBlockedMessage: "Cannot save in read-only mode",
-    xlsmPath: "C:/w/file.xlsm" as string | null,
+    xlsmPath: "C:/w/file.xlsm",
     ...overrides,
   };
 }
