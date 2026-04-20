@@ -1,12 +1,19 @@
 # Verde — Sprint History and Backlog (plan.md)
 
-Compressed record of Sprint 3–15 outcomes plus consolidated follow-up
-backlog. Sprints 13 / 14 / 15 retained with decision-grade detail as
-load-bearing inputs for Sprint 16+ planning; earlier sprints collapsed
-to a one-line index since `git log` is the authoritative source for
-their implementation detail.
+Compressed record of Sprints 3–17 plus consolidated follow-up backlog.
 
-## Sprint 3–12 summary index
+**Plan-bloat prevention policy (from Sprint 16):** at any time, only the
+three most recent *decision-bearing* sprints are retained in full detail.
+All earlier sprints collapse to one-line rows in the index table below —
+`git log` + sprint tags are the authoritative source for their
+commit-level detail. Compression-only sprints (like Sprint 16 itself) do
+not consume a detail slot, and probe-only refinement sprints occupy one
+slot at whatever density their outcome requires (often < 50 lines).
+Currently detailed: Sprint 14 / 15 / 17. A planner adding a new sprint
+section must demote the now-oldest detailed sprint into the index row in
+the same commit.
+
+## Sprint 3–13 summary index
 
 | Sprint | 主題                                                                            | 主要コミット                                                                    |
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -20,77 +27,9 @@ their implementation detail.
 | 10     | Residual `key!` force-cast Tidy in `error-parse.test`                           | `dcdac42` narrow `key` type guard (docs `b0f470c`). |
 | 11     | Residual `path as string` cast Tidy in `handleOpenFile`                         | `d024997` drop redundant cast (docs `15233cf`). — closes type-bypass arc for `src/**` (incomplete; `main.tsx:9` missed, reopened in Sprint 15). |
 | 12     | Backlog refinement only, candidates A / B / C enumerated                        | Docs `635a1af` — no code changes; rule-of-two Candidate B, product-gated A, restructure-PBI-gated C. |
+| 13     | Catalogue re-evaluation, no situation change                                    | Docs `651306c` — `openModules` probe confirmed 2 sites (still rule-of-two); A / C / four follow-ups unchanged; tests 32/32. Tail advisory: a third refinement-only sprint would argue for product conversation. |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
-
-# Sprint 13 — Catalogue re-evaluation, no situation change
-
-## Goal
-
-Re-evaluate the Sprint 12 candidate catalogue (A / B / C) and the four
-external-input-gated follow-ups after one sprint's elapsed time.
-Explicitly confirm no situation change has promoted any candidate to
-"ready for execution" and record the re-evaluation so Sprint 14 starts
-from a refreshed (not re-probed) backlog.
-
-## Scope
-
-- Re-scan `src/**` for the Candidate B signal — a third `openModules`
-  call site using a "match by filename" predicate.
-- Confirm Candidates A and C retain their "why not now" rationale.
-- Confirm all four follow-ups remain external-input-gated.
-- **No code change**, **no sprint tag** — refinement-only.
-
-## Re-scan findings
-
-Probe: `rg "openModules\.(find|filter|some|every|map|reduce)"` across
-`src/**/*.{ts,tsx}`. Three occurrences, matching Sprint 12:
-
-| Location        | Expression                                               | Pattern                  | Counts toward B? |
-| --------------- | -------------------------------------------------------- | ------------------------ | ---------------- |
-| `App.tsx:174`   | `openModules.find((m) => m.filename === mod.filename)`   | filename-match           | yes              |
-| `App.tsx:185`   | `openModules.filter((m) => m.filename !== mod.filename)` | filename-match (negated) | yes              |
-| `TabBar.tsx:32` | `openModules.map((mod) => {...})`                        | enumeration              | no               |
-
-`TabBar.tsx:32` is list render, not a filename predicate — counting it
-toward B would dilute rule-of-three into rule-of-"any use of the same
-variable", which Sprint 4's `withLoadingState` deferral rejected.
-Candidate B remains rule-of-two.
-
-## Candidate / follow-up re-evaluation
-
-- **Candidate A** (`handleKeepFile` / `"verde"` naming): still blocked
-  on product / docs decision about canonical user-facing vocabulary.
-- **Candidate C** (`App.tsx` 352 LOC split): no second error-routing
-  consumer, no restructure PBI scheduled. Gate unchanged.
-- **Four follow-ups** (TrustGuideDialog URL, Sprint 5 low-priority
-  i18n, `withLoadingState`, structured `checkConflict` logging): all
-  remain parked on original external gates.
-
-## Decision
-
-**Sprint 13 is refinement-only, no situation change.** One docs commit
-(`651306c`); no sprint tag (consistent with Sprint 12 — tags mark
-executable milestones for bisect, and re-evaluations have nothing to
-bisect to). `bun run test` 32/32; `tsc --noEmit` clean; cargo untouched.
-
-## Key decisions (condensed)
-
-- **Two consecutive refinement-only sprints is a signal, not a failure**
-  — manufacturing execution burns prioritization trust.
-- **`TabBar.tsx:32` excluded from Candidate B count**: rule-of-three is
-  "same pattern", not "same variable". Documented to prevent future
-  miscounting.
-- **Re-scan executed despite untouched code**: elapsed time carries
-  non-zero probability of new call sites from unrelated feature work;
-  probe cost (1 `rg`) is trivial.
-
-## Follow-ups
-
-Sprint 14 should either (a) re-run the same probe if no new PBI
-lands, or (b) pick up fresh product input. A third consecutive
-refinement-only sprint is acceptable but argues for a proactive
-product / PBI conversation rather than another silent re-scan.
 
 # Sprint 14 — Third consecutive refinement-only, escalate to product conversation
 
@@ -278,6 +217,62 @@ test helpers already carry the discipline; (e) no concrete surface.
   without product input; that is a one-time exception for arc
   completion, not a new autonomy charter.
 
+# Sprint 17 — Probe-only refinement; one new backend-gated follow-up surfaced
+
+## Goal
+
+Run a probe set *orthogonal* to Sprints 15 / 16 type-bypass scans
+(`TODO|FIXME|XXX`, `any\b`, `// eslint-disable`) to test whether drift
+since Sprint 15 has accreted new Tidy signals. Secondary goal: promote
+the plan-bloat policy from example to explicit rule in the preamble.
+
+## Probes executed (3 of 3 budget)
+
+1. `rg "TODO|FIXME|XXX" src/` — 2 hits. `App.tsx:155` matches backlog
+   #1 (already catalogued). **`App.tsx:211` is NEW**: `// TODO: wire
+   ConflictDialog here once the backend reports file-vs-Excel content
+   conflicts (different from EXCEL_OPEN...)`. Backend-gated on a new
+   error-kind distinct from EXCEL_OPEN. Logged as backlog #12.
+2. `rg "\bany\b" src/ --type ts` — 2 hits, both natural-language "any"
+   in `App.test.tsx` comments (not the `any` type). False positives.
+3. `rg "// eslint-disable" src/` — 0 hits.
+
+Sprint 15 bypass re-probe (`\!\.`, `as\s+[A-Z]`) skipped: no `src/**`
+commit since `8e15c3d`, so the result would be identical. Re-run
+deferred to the first sprint following any src-level change.
+
+## Decision
+
+**Probe-only, no code change, no sprint tag.** The `App.tsx:211` TODO
+is backend-gated wiring work (not rule-of-three duplication); Sprint
+15's technical-Tidy exception does *not* extend to it. One docs commit.
+Tests / tsc / cargo untouched.
+
+## Key decisions
+
+- **Orthogonal probe axis is the anti-theatre mechanism**: `TODO`
+  scanning is independent of Sprints 15 / 16 bypass scans. A truly
+  exhausted pool must return empty on both axes; one non-empty probe
+  (this sprint's `App.tsx:211`) validates the exercise.
+- **Plan-bloat policy promoted from example to rule**: preamble now
+  states the forward-looking "three most recent detailed" rule
+  explicitly; Sprint 13 demoted to the index table in the same commit
+  to demonstrate the rule (not a backlog bankruptcy).
+- **Escalation signal compounding**: Sprint 14 escalated, Sprint 15
+  took a technical exception, Sprint 17 surfaces a backend-gated TODO.
+  Three distinct sprints pointing at external input as the binding
+  constraint — this is the case for an out-of-band product conversation
+  rather than a Sprint 18 default silent re-probe.
+
+## Follow-ups
+
+- Sprint 18: prefer out-of-band product / backend conversation over
+  a fifth consecutive silent cycle.
+- Re-run bypass probe (`\!\.`, `as\s+[A-Z]`) after the next `src/**`
+  change; current skip must not calcify.
+- Backlog #12 is a Planning pickup (not a Tidy) once the backend
+  error-kind lands: dialog + routing both need design.
+
 # Consolidated open follow-up backlog
 
 Deduplicated across Sprint 3–15. Closed items omitted (already applied
@@ -297,3 +292,4 @@ source and the external gate blocking execution.
 | 9   | Candidate C — `App.tsx` (352 LOC) responsibility split           | S12           | Restructure PBI with explicit test-refactor scope |
 | 10  | Post-Sprint 15 bypass re-probe in Sprint 16+ checklist           | S15           | Planning-process update (Sprint 11 blind spot)    |
 | 11  | Sprint 16 default: re-run product / PBI escalation prompt        | S15           | Sprint 15 was one-time arc-completion exception   |
+| 12  | `App.tsx:211` ConflictDialog wiring for content-conflict reporting | S17         | Backend emits a content-conflict error-kind distinct from EXCEL_OPEN |
