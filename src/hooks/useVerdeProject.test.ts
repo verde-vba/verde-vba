@@ -119,5 +119,44 @@ describe("useVerdeProject", () => {
       // keeping the matcher in parseBackendError the single source of truth.
       expect(result.current.error).toBe("project not found: abc123");
     });
+
+    it("resets loading back to false after the rethrow (finally clause)", async () => {
+      // Arrange: drive syncToExcel to a rejection, then observe that the
+      // loading flag the hook flips to `true` at entry is cleared before
+      // control returns to the caller. The finally clause is the only
+      // place that can clear it on the error path — the catch rethrows.
+      const project = makeProject();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "open_project") return Promise.resolve(project);
+        if (cmd === "check_conflict") return Promise.resolve([]);
+        if (cmd === "sync_to_excel") {
+          return Promise.reject(
+            new Error("project not found: deadbeef00000000")
+          );
+        }
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      });
+
+      const { result } = renderHook(() => useVerdeProject());
+
+      // Sanity check: loading starts false so the post-rejection assertion
+      // can't be trivially satisfied by an initial-state coincidence.
+      expect(result.current.loading).toBe(false);
+
+      await act(async () => {
+        await result.current.openProject(project.xlsm_path);
+      });
+      await waitFor(() => expect(result.current.project).not.toBeNull());
+
+      // Act: observe the rejection. After the rethrow surfaces, loading
+      // MUST have been cleared — proving the finally block ran.
+      await act(async () => {
+        await expect(result.current.syncToExcel()).rejects.toThrow(
+          "project not found: deadbeef00000000"
+        );
+      });
+
+      expect(result.current.loading).toBe(false);
+    });
   });
 });
