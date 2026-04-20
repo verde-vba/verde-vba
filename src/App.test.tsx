@@ -43,90 +43,63 @@ import { initI18n } from "./hooks/useLocale";
 // the raw keys, which is what we assert against below.
 initI18n("en");
 
+// Default settings payload used when `get_settings` is invoked. Trust is
+// pre-acknowledged so TrustGuideDialog doesn't steal the render.
+const defaultSettingsResponse = {
+  theme: "system",
+  language: "auto",
+  editor: {
+    font_size: 14,
+    font_family: "monospace",
+    tab_size: 4,
+    word_wrap: "off",
+    minimap: true,
+  },
+  sync: { auto_sync_to_excel: true },
+  trust: { vbaAcknowledged: true },
+};
+
+// Wire the standard "settings load OK + open_project fails" backend, then
+// drive the WelcomeScreen open action and wait for the resulting banner.
+// Returns the banner element so the caller can assert on its content.
+async function renderAppWithOpenError(openError: string) {
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === "get_settings") {
+      return Promise.resolve(defaultSettingsResponse);
+    }
+    if (cmd === "open_project") {
+      return Promise.reject(new Error(openError));
+    }
+    return Promise.reject(new Error(`unexpected command: ${cmd}`));
+  });
+
+  render(<App />);
+  // WelcomeScreen surfaces the open action via t("menu.open") === "Open .xlsm"
+  const openButton = await screen.findByRole("button", {
+    name: "Open .xlsm",
+  });
+  fireEvent.click(openButton);
+  return await screen.findByRole("alert");
+}
+
 describe("App error banner", () => {
   beforeEach(() => {
     invokeMock.mockReset();
   });
 
   it("renders the projectNotFound banner with the localized title when open_project rejects with a 'project not found:' message", async () => {
-    // Arrange: settings load succeeds so TrustGuideDialog doesn't steal
-    // the render; open_project rejects with the exact backend substring
-    // parseBackendError keys on for the `projectNotFound` variant.
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_settings") {
-        return Promise.resolve({
-          theme: "system",
-          language: "auto",
-          editor: {
-            font_size: 14,
-            font_family: "monospace",
-            tab_size: 4,
-            word_wrap: "off",
-            minimap: true,
-          },
-          sync: { auto_sync_to_excel: true },
-          trust: { vbaAcknowledged: true },
-        });
-      }
-      if (cmd === "open_project") {
-        return Promise.reject(
-          new Error("project not found: deadbeef00000000")
-        );
-      }
-      return Promise.reject(new Error(`unexpected command: ${cmd}`));
-    });
-
-    // Act
-    render(<App />);
-    // WelcomeScreen surfaces the open action via t("menu.open") === "Open .xlsm"
-    const openButton = await screen.findByRole("button", {
-      name: "Open .xlsm",
-    });
-    fireEvent.click(openButton);
-
     // Assert: the error banner (role="alert") must carry the localized
     // title from en.json → errors.projectNotFound.title. Asserting on the
     // *English* title (not the i18n key) proves both that routeParsedError
     // ran AND that toI18nKey's mapping round-trips through react-i18next.
-    const banner = await screen.findByRole("alert");
+    const banner = await renderAppWithOpenError(
+      "project not found: deadbeef00000000"
+    );
     expect(banner).toHaveTextContent("Project not found");
   });
 
   it("clears the error banner when the user clicks the dismiss button", async () => {
-    // Arrange: same backend shape as the projectNotFound test — settings
-    // load succeeds, open_project rejects so the banner appears, then the
-    // user dismisses it.
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_settings") {
-        return Promise.resolve({
-          theme: "system",
-          language: "auto",
-          editor: {
-            font_size: 14,
-            font_family: "monospace",
-            tab_size: 4,
-            word_wrap: "off",
-            minimap: true,
-          },
-          sync: { auto_sync_to_excel: true },
-          trust: { vbaAcknowledged: true },
-        });
-      }
-      if (cmd === "open_project") {
-        return Promise.reject(
-          new Error("project not found: deadbeef00000000")
-        );
-      }
-      return Promise.reject(new Error(`unexpected command: ${cmd}`));
-    });
-
-    // Act: render, trigger the failing open, wait for the banner.
-    render(<App />);
-    const openButton = await screen.findByRole("button", {
-      name: "Open .xlsm",
-    });
-    fireEvent.click(openButton);
-    await screen.findByRole("alert");
+    await renderAppWithOpenError("project not found: deadbeef00000000");
 
     // Click the dismiss button — label comes from en.json common.dismiss.
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
