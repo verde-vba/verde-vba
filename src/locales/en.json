@@ -2,6 +2,9 @@
   "app": {
     "title": "Verde"
   },
+  "common": {
+    "dismiss": "Dismiss"
+  },
   "menu": {
     "open": "Open .xlsm",
     "syncToExcel": "Sync to Excel",
@@ -15,7 +18,10 @@
     "syncing": "Syncing to Excel...",
     "synced": "Synced",
     "readOnly": "Read-Only (locked by another user)",
-    "saved": "Saved {{filename}}"
+    "saved": "Saved {{filename}}",
+    "saveBlocked": "Cannot save while in Read-Only mode. Close and reopen with write access to save changes.",
+    "excelOpen": "Excel has this workbook open. Close Excel and try saving again.",
+    "lineColumn": "Ln {{line}}, Col {{column}}"
   },
   "lock": {
     "title": "File is locked",
@@ -39,7 +45,8 @@
     "noProject": "No project open",
     "welcome": "AI-native VBA development environment",
     "openPrompt": "Open .xlsm file to get started",
-    "rightClickTip": "Tip: Right-click any .xlsm file → Open with Verde"
+    "rightClickTip": "Tip: Right-click any .xlsm file → Open with Verde",
+    "saveAction": "Save"
   },
   "outline": {
     "title": "Outline"
