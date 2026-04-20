@@ -25,68 +25,53 @@ export function useVerdeProject() {
     readOnly: false,
   });
 
-  const openProject = useCallback(async (xlsmPath: string) => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const project = await commands.openProject(xlsmPath);
-      setState({
-        project,
-        activeModule: project.modules[0] ?? null,
-        loading: false,
-        error: null,
-        readOnly: false,
-      });
-    } catch (e) {
-      setState((s) => ({
-        ...s,
-        loading: false,
-        error: e instanceof Error ? e.message : String(e),
-      }));
-      throw e;
-    }
-  }, []);
+  // Shared open-flow: the three entry points differ only in which backend
+  // command they invoke and whether the resulting project is read-only.
+  // Keeping the loading/error boilerplate in one place means every flow
+  // stays in lockstep (e.g. clearing stale errors on retry).
+  const runOpen = useCallback(
+    async (
+      invoke: (xlsmPath: string) => Promise<ProjectInfo>,
+      xlsmPath: string,
+      readOnly: boolean
+    ) => {
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        const project = await invoke(xlsmPath);
+        setState({
+          project,
+          activeModule: project.modules[0] ?? null,
+          loading: false,
+          error: null,
+          readOnly,
+        });
+      } catch (e) {
+        setState((s) => ({
+          ...s,
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+        }));
+        throw e;
+      }
+    },
+    []
+  );
 
-  const forceOpenProject = useCallback(async (xlsmPath: string) => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const project = await commands.forceOpenProject(xlsmPath);
-      setState({
-        project,
-        activeModule: project.modules[0] ?? null,
-        loading: false,
-        error: null,
-        readOnly: false,
-      });
-    } catch (e) {
-      setState((s) => ({
-        ...s,
-        loading: false,
-        error: e instanceof Error ? e.message : String(e),
-      }));
-      throw e;
-    }
-  }, []);
+  const openProject = useCallback(
+    (xlsmPath: string) => runOpen(commands.openProject, xlsmPath, false),
+    [runOpen]
+  );
 
-  const openProjectReadOnly = useCallback(async (xlsmPath: string) => {
-    setState((s) => ({ ...s, loading: true, error: null }));
-    try {
-      const project = await commands.openProjectReadOnly(xlsmPath);
-      setState({
-        project,
-        activeModule: project.modules[0] ?? null,
-        loading: false,
-        error: null,
-        readOnly: true,
-      });
-    } catch (e) {
-      setState((s) => ({
-        ...s,
-        loading: false,
-        error: e instanceof Error ? e.message : String(e),
-      }));
-      throw e;
-    }
-  }, []);
+  const forceOpenProject = useCallback(
+    (xlsmPath: string) => runOpen(commands.forceOpenProject, xlsmPath, false),
+    [runOpen]
+  );
+
+  const openProjectReadOnly = useCallback(
+    (xlsmPath: string) =>
+      runOpen(commands.openProjectReadOnly, xlsmPath, true),
+    [runOpen]
+  );
 
   const setActiveModule = useCallback((module: ModuleInfo) => {
     setState((s) => ({ ...s, activeModule: module }));
