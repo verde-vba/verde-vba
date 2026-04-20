@@ -71,14 +71,12 @@ untranslated raw string.
 
 ## Follow-ups (out of Sprint 3 scope)
 
-- **Loading-flag asymmetry**: `runOpen` toggles `loading` around its
-  work; `saveModule` / `syncToExcel` / `resolveConflict` do not. Either
-  they should, or the field should be renamed to reflect that it only
-  tracks open flows. Pick one intentionally in a later sprint.
-- **`saveBlockedPrompt` / `excelOpenPrompt` still carry hardcoded
+- ~~**Loading-flag asymmetry**: `runOpen` toggles `loading` around its
+  work; `saveModule` / `syncToExcel` / `resolveConflict` do not.~~
+  Addressed in Sprint 4 (A-stream).
+- ~~**`saveBlockedPrompt` / `excelOpenPrompt` still carry hardcoded
   English** ("Dismiss", "Cannot save while Excel has the workbook
-  open."). The errorBanner pulled these through `t(...)`; the two older
-  prompts are the next natural i18n pass.
+  open.").~~ Addressed in Sprint 4 (B-stream).
 - **`ConflictDialog` i18n parity**: dialog text has not yet been audited
   for the same localization pass that `routeParsedError` completed for
   banners.
@@ -93,3 +91,85 @@ untranslated raw string.
   and drops the error so macOS / no-Excel environments still open the
   file. Should log at least a console.warn so a real regression doesn't
   hide behind the platform-missing case.
+
+# Sprint 4 — Loading-flag symmetry and banner i18n
+
+## Goal
+
+Unify the loading-flag lifecycle across `useVerdeProject` mutation
+hooks and eliminate the hardcoded English strings that still lived
+inside the `saveBlocked` and `excelOpen` banner prompts.
+
+## Scope
+
+- **A-stream**: add loading toggles to `saveModule` / `syncToExcel` /
+  `resolveConflict` via `try { loading:true } catch finally
+  { loading:false }`, matching the canonical pattern already in
+  `runOpen`.
+- **B-stream**: i18n the three remaining hardcoded English strings in
+  `App.tsx` banner prompts — two `dismissLabel` props on the
+  `saveBlocked` and `excelOpen` banners, and the `excelOpen` body
+  message.
+- Preserve Kent Beck TDD / Tidy First discipline — every behavior
+  change starts from a failing test, structural tidies land as
+  separate `refactor:` commits.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type           | Summary                                                                           |
+| ------- | -------------- | --------------------------------------------------------------------------------- |
+| 1bd5c5a | feat(hooks)    | Unify loading-flag lifecycle across mutation hooks                                |
+| f8df5f0 | feat(ui)       | i18n `saveBlocked` and `excelOpen` banner prompts                                 |
+| 76798cd | test(hooks)    | Characterize loading resets to false after mutation rethrow (TDD iter 1A)         |
+| c77c226 | test(ui)       | Characterize `excelOpen` banner i18n wiring (TDD iter 1B)                         |
+| 850d08b | test(hooks)    | Characterize loading reflects pending invoke state (TDD iter 2A)                  |
+| d24fe37 | refactor(test) | Extract `setupOpenedProject` helper for syncToExcel tests (Phase 6 tidy-after)    |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **26** tests across 4 files)
+- `bun run tsc --noEmit` — clean
+- `cargo` — untouched (no Rust changes in Sprint 4)
+
+## Key decisions
+
+- **`runOpen` left unchanged**: it is the canonical template the other
+  hooks now imitate. Its inline conflict-check branching is orthogonal
+  to the symmetry work and out of scope for this sprint.
+- **No new locale keys added**: the B-stream reused `common.dismiss`
+  (already present for the errorBanner) and `status.excelOpen.*` (the
+  latter aligns with `toI18nKey(excelOpen)`'s mapping, keeping the same
+  i18n surface for both the dedicated prompt and any routed fallback
+  path).
+- **`loading` remains unconsumed by UI today**: symmetry readies future
+  spinner wiring without forcing a consumer now. Renaming the field to
+  reflect an open-only lifecycle would have been the cheaper
+  alternative; we preferred to preserve the more generally-useful
+  mutation-lifecycle semantics.
+- **Integration test for `excelOpen` banner uses a minimal `<Editor>`
+  stub**: exposing the save trigger in jsdom without booting Monaco
+  keeps the test fast and avoids a second environment. The stub is
+  `vi.mock`'d at module scope so the real Editor is still exercised by
+  the app at runtime.
+- **Phase 6 tidy skipped one candidate**: a `withLoadingState` helper
+  around the try/catch/finally shell would have required awkward
+  callback plumbing for the inner success-path variation
+  (`setState({ conflict: null })` inside `resolveConflict`, early-throw
+  preamble in `saveModule`). The three call sites stay readable as-is;
+  extraction was not a genuine win.
+
+## Follow-ups (out of Sprint 4 scope)
+
+- **`ConflictDialog` i18n pass** — still outstanding from Sprint 3.
+- **`TrustGuideDialog` URL / docs reference review** — still pointing
+  at a Microsoft support URL.
+- **`handleCloseModule` `null!` narrowing** — widen the hook signature
+  to accept `null` rather than force-casting.
+- **`checkConflict` silent failure path** — at least a `console.warn`
+  so a real regression doesn't hide behind the platform-missing case.
+- **`"Excel Macro"` file-dialog filter string in `App.tsx`** — Sprint 4
+  did NOT address this hardcoded English. Tiny candidate for a
+  Sprint 5 i18n follow-up.
+- **Optional: `withLoadingState` helper** — adopt only if the
+  loading-flag shape proliferates beyond the current three mutation
+  hooks.
