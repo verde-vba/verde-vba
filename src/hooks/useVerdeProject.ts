@@ -56,7 +56,6 @@ export function useVerdeProject() {
             conflict = { projectId: project.project_id, modules };
           }
         } catch {
-          conflict = null;
         }
         setState({
           project,

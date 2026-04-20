@@ -301,7 +301,7 @@ function App() {
       )}
 
       <StatusBar
-        status={project ? "ready" : "ready"}
+        status="ready"
         projectId={project?.project_id}
       />
 
