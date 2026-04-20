@@ -293,3 +293,43 @@ source and the external gate blocking execution.
 | 10  | Post-Sprint 15 bypass re-probe in Sprint 16+ checklist           | S15           | Planning-process update (Sprint 11 blind spot)    |
 | 11  | Sprint 16 default: re-run product / PBI escalation prompt        | S15           | Sprint 15 was one-time arc-completion exception   |
 | 12  | `App.tsx:211` ConflictDialog wiring for content-conflict reporting | S17         | Backend emits a content-conflict error-kind distinct from EXCEL_OPEN |
+
+## Intentional Pause (2026-04-21 以降)
+
+Sprint 12 / 13 / 14 / 17 の refinement-only と Sprint 15 の技術例外
+（`main.tsx` 非 null 断言除去 — arc completion 目的の one-time exception）
+により、product input 不在のサイクルが実質 5 連続に達した。Sprint 18
+以降について、巡回側の自動起動による silent probe / refinement-only
+cycle を**停止**する。Sprint 17 の Follow-ups で既に out-of-band
+product / backend 会話が推奨されており、本セクションはその推奨を
+「次サイクルをデフォルト起動しない」という**明示的な停止指示**に昇格
+させる durable signal である。
+
+**再開条件**（いずれか 1 つが成立すれば Sprint 18 を正規起動）:
+
+- (a) backlog #1 — `TrustGuideDialog` が参照すべき Verde docs URL が
+  product 側で確定し、文言 / リンクが planner に伝達される。
+- (b) backlog #12 — backend が content-conflict を `EXCEL_OPEN` と
+  区別される error-kind として発出するようになり、`App.tsx:211` の
+  ConflictDialog wiring が Planning ピックアップ可能になる。
+- (c) 上記以外の新規 PBI が stakeholder から明示的に投入される
+  （rule-of-three / restructure PBI / UX 改善 など、種別問わず）。
+
+**Pause 中にやらないこと**:
+
+- 同一 probe set の 5 回目の silent re-run。
+- Sprint 15 のような technical-exception Tidy の自己発見。arc completion
+  相当の明確な正当化がない限り、planner 自発の code change は追加しない。
+- 本 Pause セクションの書き換えによる条件緩和。再開条件は stakeholder
+  側からの signal で解除されるべきもので、planner 側での再解釈で解除
+  してはならない。
+
+**Pause 中にやること（再開前提の小作業のみ）**:
+
+- 新規 commit / issue / PR が `main` に到着した際に、(a)(b)(c) のいずれか
+  に該当するか判定し、該当すれば Sprint 18 Planning に移行。
+- 再開条件を満たす signal が到着しないまま十分な時間が経過した場合、
+  Pause そのものを「backlog bankruptcy が近い」という escalation signal
+  として product チャネルに再提示することは可（ただしこれも Pause を
+  planner 単独で解除する手段ではない）。
+
