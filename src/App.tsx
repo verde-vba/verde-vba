@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConflictDialog } from "./components/ConflictDialog";
 import { Editor } from "./components/Editor";
 import { LockDialog } from "./components/LockDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -23,6 +24,7 @@ interface LockPrompt {
 function App() {
   const { resolved } = useTheme("system");
   const { t } = useTranslation();
+  const projectState = useVerdeProject();
   const {
     project,
     activeModule,
@@ -32,7 +34,20 @@ function App() {
     openProjectReadOnly,
     setActiveModule,
     saveModule,
-  } = useVerdeProject();
+  } = projectState;
+  // Task 2 will extend useVerdeProject() with `conflict` and
+  // `resolveConflict`. Read them through a cast so this file compiles
+  // while their work is still landing; once their hook types are in we
+  // can drop the cast. TODO: remove the any-cast after useVerdeProject
+  // exports conflict/resolveConflict in its return type.
+  const maybeConflictState = projectState as unknown as {
+    conflict?: { modules?: unknown[]; conflictingModules?: unknown[] } | null;
+    resolveConflict?: (side: "verde" | "excel") => Promise<void>;
+  };
+  const conflict = maybeConflictState.conflict ?? null;
+  const resolveConflict = maybeConflictState.resolveConflict;
+  const conflictCount =
+    (conflict?.modules?.length ?? conflict?.conflictingModules?.length ?? 0);
   const { acknowledged: trustAcknowledged, acknowledge: acknowledgeTrust } =
     useTrust();
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
@@ -110,6 +125,16 @@ function App() {
     );
     void acknowledgeTrust();
   }, [acknowledgeTrust]);
+
+  const handleKeepFile = useCallback(() => {
+    // TODO: remove guard once useVerdeProject.resolveConflict is landed.
+    if (resolveConflict) void resolveConflict("verde");
+  }, [resolveConflict]);
+
+  const handleKeepExcel = useCallback(() => {
+    // TODO: remove guard once useVerdeProject.resolveConflict is landed.
+    if (resolveConflict) void resolveConflict("excel");
+  }, [resolveConflict]);
 
   const handleSelectModule = useCallback(
     (mod: ModuleInfo) => {
@@ -311,6 +336,14 @@ function App() {
         <TrustGuideDialog
           onClose={handleTrustClose}
           onHowTo={handleTrustHowTo}
+        />
+      )}
+
+      {conflict != null && (
+        <ConflictDialog
+          count={conflictCount}
+          onKeepFile={handleKeepFile}
+          onKeepExcel={handleKeepExcel}
         />
       )}
     </div>
