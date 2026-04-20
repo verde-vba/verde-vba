@@ -112,6 +112,47 @@ describe("useVerdeProject", () => {
     });
   });
 
+  describe("checkConflict silent failure", () => {
+    it("surfaces a console.warn when the conflict check rejects, while still opening the project", async () => {
+      // Arrange: open_project resolves (so the editor can reveal the file)
+      // but check_conflict rejects — the macOS / no-Excel scenario. The
+      // hook historically swallowed this silently, which hid real
+      // regressions behind the platform-missing case. A warn now tags the
+      // failure for anyone tailing the devtools console.
+      const project = makeProject();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "open_project") return Promise.resolve(project);
+        if (cmd === "check_conflict") {
+          return Promise.reject(new Error("Excel COM unavailable"));
+        }
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      });
+
+      const { result } = renderHook(() => useVerdeProject());
+
+      // Act: the open flow must NOT reject — preserving the swallow
+      // invariant. "Cannot check" is still not "conflict", so the user
+      // gets into the file as before.
+      await act(async () => {
+        await result.current.openProject(project.xlsm_path);
+      });
+      await waitFor(() => expect(result.current.project).not.toBeNull());
+
+      // Assert: the warn must be called with the underlying error so a
+      // real regression is no longer invisible. The first arg is a stable
+      // tag; the second carries the Error instance for inspection.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toMatch(/checkConflict/);
+      // And the swallow invariant: state.conflict is still null — the
+      // fix must not accidentally surface a fake conflict to the user.
+      expect(result.current.conflict).toBeNull();
+      expect(result.current.error).toBeNull();
+
+      warnSpy.mockRestore();
+    });
+  });
+
   describe("syncToExcel error handling", () => {
     it("routes backend errors through the message idiom so the raw substring is preserved (not prefixed with 'Error: ')", async () => {
       // Arrange: open succeeds, conflict check returns empty, sync rejects
