@@ -38,6 +38,69 @@ pub(crate) fn validate_ps_arg(kind: &str, s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Sprint 23 / PBI #15 preparatory structural tidy (Tidy First).
+///
+/// Hoisting the PS body out of `format!` lets Commit 3 swap in `$env:*`
+/// references without touching control flow — substitution is routed
+/// through placeholder tokens (`{XLSM_PATH}` etc.) today, through OS env
+/// vars tomorrow. The script text itself stops being Rust-format-escaped
+/// (`{{` / `}}` → `{` / `}`), which also improves grep / copy-paste
+/// fidelity against the real PowerShell the process executes.
+#[cfg(windows)]
+const EXPORT_SCRIPT_TEMPLATE: &str = r#"
+$excel = New-Object -ComObject Excel.Application
+$excel.Visible = $false
+$excel.DisplayAlerts = $false
+try {
+    $wb = $excel.Workbooks.Open("{XLSM_PATH}")
+    $modules = @()
+    foreach ($comp in $wb.VBProject.VBComponents) {
+        $ext = switch ($comp.Type) {
+            1 { ".bas" }
+            2 { ".cls" }
+            3 { ".frm" }
+            100 { ".cls" }
+            default { ".bas" }
+        }
+        $filename = $comp.Name + $ext
+        $filepath = Join-Path "{OUTPUT_DIR}" $filename
+        $comp.Export($filepath)
+        $modules += $filename
+    }
+    $wb.Close($false)
+    $modules | ConvertTo-Json
+} finally {
+    $excel.Quit()
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+}
+"#;
+
+#[cfg(windows)]
+const IMPORT_SCRIPT_TEMPLATE: &str = r#"
+$excel = New-Object -ComObject Excel.Application
+$excel.Visible = $false
+$excel.DisplayAlerts = $false
+try {
+    $wb = $excel.Workbooks.Open("{XLSM_PATH}")
+    $existing = $wb.VBProject.VBComponents | Where-Object { $_.Name -eq "{MODULE_NAME}" }
+    if ($existing -and $existing.Type -ne 100) {
+        $wb.VBProject.VBComponents.Remove($existing)
+    }
+    if ($existing -and $existing.Type -eq 100) {
+        $code = Get-Content "{MODULE_PATH}" -Raw
+        $existing.CodeModule.DeleteLines(1, $existing.CodeModule.CountOfLines)
+        $existing.CodeModule.AddFromString($code)
+    } else {
+        $wb.VBProject.VBComponents.Import("{MODULE_PATH}")
+    }
+    $wb.Save()
+    $wb.Close($false)
+} finally {
+    $excel.Quit()
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+}
+"#;
+
 pub struct VbaBridge;
 
 impl VbaBridge {
@@ -49,35 +112,9 @@ impl VbaBridge {
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         validate_ps_arg("xlsm_path", xlsm_path)?;
         validate_ps_arg("output_dir", output_dir)?;
-        let script = format!(
-            r#"
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $false
-$excel.DisplayAlerts = $false
-try {{
-    $wb = $excel.Workbooks.Open("{xlsm_path}")
-    $modules = @()
-    foreach ($comp in $wb.VBProject.VBComponents) {{
-        $ext = switch ($comp.Type) {{
-            1 {{ ".bas" }}
-            2 {{ ".cls" }}
-            3 {{ ".frm" }}
-            100 {{ ".cls" }}
-            default {{ ".bas" }}
-        }}
-        $filename = $comp.Name + $ext
-        $filepath = Join-Path "{output_dir}" $filename
-        $comp.Export($filepath)
-        $modules += $filename
-    }}
-    $wb.Close($false)
-    $modules | ConvertTo-Json
-}} finally {{
-    $excel.Quit()
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
-}}
-"#
-        );
+        let script = EXPORT_SCRIPT_TEMPLATE
+            .replace("{XLSM_PATH}", xlsm_path)
+            .replace("{OUTPUT_DIR}", output_dir);
 
         let output = Command::new("powershell")
             .args([
@@ -121,33 +158,10 @@ try {{
         let module_path_str = module_path.to_string_lossy();
         validate_ps_arg("module_path", &module_path_str)?;
 
-        let script = format!(
-            r#"
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $false
-$excel.DisplayAlerts = $false
-try {{
-    $wb = $excel.Workbooks.Open("{xlsm_path}")
-    $existing = $wb.VBProject.VBComponents | Where-Object {{ $_.Name -eq "{module_name}" }}
-    if ($existing -and $existing.Type -ne 100) {{
-        $wb.VBProject.VBComponents.Remove($existing)
-    }}
-    if ($existing -and $existing.Type -eq 100) {{
-        $code = Get-Content "{}" -Raw
-        $existing.CodeModule.DeleteLines(1, $existing.CodeModule.CountOfLines)
-        $existing.CodeModule.AddFromString($code)
-    }} else {{
-        $wb.VBProject.VBComponents.Import("{}")
-    }}
-    $wb.Save()
-    $wb.Close($false)
-}} finally {{
-    $excel.Quit()
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
-}}
-"#,
-            module_path_str, module_path_str
-        );
+        let script = IMPORT_SCRIPT_TEMPLATE
+            .replace("{XLSM_PATH}", xlsm_path)
+            .replace("{MODULE_NAME}", &module_name)
+            .replace("{MODULE_PATH}", &module_path_str);
 
         let output = Command::new("powershell")
             .args([
