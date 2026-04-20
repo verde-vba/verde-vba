@@ -107,4 +107,45 @@ describe("App error banner", () => {
     // Assert: the banner is gone. waitFor handles the React state flush.
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
+
+  it("does not render the error banner when the backend rejects with a locked error during force-open", async () => {
+    // Both the initial open AND the force-open retry reject with LOCKED.
+    // The invariant under test: a locked-kind ParsedError must surface via
+    // the LockDialog, never via the generic red errorBanner. The first
+    // rejection is the standard lock-on-open path; the second simulates the
+    // (rare but possible) race where a different user re-acquired the lock
+    // between the user clicking "Force Open" and the backend retrying.
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return Promise.resolve(defaultSettingsResponse);
+      }
+      if (cmd === "open_project" || cmd === "force_open_project") {
+        return Promise.reject(
+          new Error("LOCKED:alice:WORKSTATION:2026-04-20T12:00:00Z")
+        );
+      }
+      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+    });
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open .xlsm" })
+    );
+
+    // First LockDialog appears for the initial lock.
+    const forceOpenButton = await screen.findByRole("button", {
+      name: "Force Open",
+    });
+    fireEvent.click(forceOpenButton);
+
+    // After the force-open rejection settles, give React a tick to flush
+    // any state updates that might surface a banner. We then assert no
+    // generic alert is rendered — that's the invariant.
+    await waitFor(() => {
+      // The force_open_project rejection must have been observed before we
+      // can meaningfully assert on its UI consequences. Check the mock.
+      expect(invokeMock).toHaveBeenCalledWith("force_open_project", expect.anything());
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });
