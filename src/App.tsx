@@ -10,11 +10,11 @@ import { TabBar } from "./components/TabBar";
 import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useErrorRouting } from "./hooks/useErrorRouting";
+import { useModuleTabs } from "./hooks/useModuleTabs";
 import { useTheme } from "./hooks/useTheme";
 import { useTrust } from "./hooks/useTrust";
 import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./hooks/useVerdeProject";
 import { parseBackendError, toI18nKey } from "./lib/error-parse";
-import type { ModuleInfo } from "./lib/types";
 
 interface LockPrompt {
   xlsmPath: string;
@@ -47,7 +47,10 @@ function App() {
     setExcelOpenPrompt,
     routeParsedError,
   } = useErrorRouting();
-  const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
+  const { openModules, handleSelectModule, handleCloseModule } = useModuleTabs({
+    activeModule,
+    setActiveModule,
+  });
   const [editorContent, setEditorContent] = useState("");
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
   const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(
@@ -136,28 +139,6 @@ function App() {
     void resolveConflict("excel");
   }, [resolveConflict]);
 
-  const handleSelectModule = useCallback(
-    (mod: ModuleInfo) => {
-      setActiveModule(mod);
-      if (!openModules.find((m) => m.filename === mod.filename)) {
-        setOpenModules((prev) => [...prev, mod]);
-      }
-    },
-    [openModules, setActiveModule]
-  );
-
-  const handleCloseModule = useCallback(
-    (mod: ModuleInfo) => {
-      setOpenModules((prev) => prev.filter((m) => m.filename !== mod.filename));
-      if (activeModule?.filename === mod.filename) {
-        const remaining = openModules.filter(
-          (m) => m.filename !== mod.filename
-        );
-        setActiveModule(remaining[remaining.length - 1] ?? null);
-      }
-    },
-    [activeModule, openModules, setActiveModule]
-  );
 
   const handleSave = useCallback(
     async (content: string) => {
