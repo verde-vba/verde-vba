@@ -51,12 +51,19 @@ function App() {
   // single function so the exhaustive `never` default forces every future
   // ParsedError kind to be handled in one place rather than scattered across
   // catch sites.
+  //
+  // INVARIANT: `locked` is intentionally NOT routed to the generic
+  // errorBanner. It carries contextual data (xlsmPath) that lives at the
+  // call site, and it has its own dedicated UI (LockDialog). Each catch
+  // site is responsible for short-circuiting locked into setLockPrompt
+  // before delegating the residual kinds here.
   const routeParsedError = useCallback((parsed: ParsedError) => {
     switch (parsed.kind) {
       case "locked":
-        // `locked` is contextual (it needs the xlsmPath in scope) so it is
-        // handled inline at its single call site rather than here.
-        setErrorBanner(parsed);
+        // No-op: locked must be handled at the call site (see invariant
+        // above). Reaching this branch means a caller forgot to
+        // short-circuit; we drop it rather than render a misleading
+        // generic banner that the user cannot act on.
         return;
       case "excelOpen":
         setExcelOpenPrompt(parsed.detail);
@@ -73,6 +80,28 @@ function App() {
     }
   }, []);
 
+  // Wraps a caught backend error so each callback short-circuits the
+  // locked kind into setLockPrompt (with the xlsmPath context only the
+  // call site knows) before delegating residual kinds to routeParsedError.
+  // Centralizing this keeps the four catch sites in lockstep on the
+  // "locked never reaches the generic banner" invariant.
+  const handleCaughtBackendError = useCallback(
+    (e: unknown, xlsmPath: string | null) => {
+      const parsed = parseBackendError(e);
+      if (parsed.kind === "locked" && xlsmPath) {
+        setLockPrompt({
+          xlsmPath,
+          user: parsed.user,
+          machine: parsed.machine,
+          time: parsed.time,
+        });
+        return;
+      }
+      routeParsedError(parsed);
+    },
+    [routeParsedError]
+  );
+
   const handleOpenFile = useCallback(async () => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -84,23 +113,13 @@ function App() {
       try {
         await openProject(xlsmPath);
       } catch (e) {
-        const parsed = parseBackendError(e);
-        if (parsed.kind === "locked") {
-          setLockPrompt({
-            xlsmPath,
-            user: parsed.user,
-            machine: parsed.machine,
-            time: parsed.time,
-          });
-        } else {
-          routeParsedError(parsed);
-        }
+        handleCaughtBackendError(e, xlsmPath);
       }
     } catch {
       // Dev mode fallback (plugin-dialog only available inside Tauri runtime)
       console.log("File dialog not available outside Tauri");
     }
-  }, [openProject, routeParsedError]);
+  }, [openProject, handleCaughtBackendError]);
 
   const handleForceOpen = useCallback(async () => {
     if (!lockPrompt) return;
@@ -109,9 +128,9 @@ function App() {
     try {
       await forceOpenProject(xlsmPath);
     } catch (e) {
-      routeParsedError(parseBackendError(e));
+      handleCaughtBackendError(e, xlsmPath);
     }
-  }, [lockPrompt, forceOpenProject, routeParsedError]);
+  }, [lockPrompt, forceOpenProject, handleCaughtBackendError]);
 
   const handleOpenReadOnly = useCallback(async () => {
     if (!lockPrompt) return;
@@ -120,9 +139,9 @@ function App() {
     try {
       await openProjectReadOnly(xlsmPath);
     } catch (e) {
-      routeParsedError(parseBackendError(e));
+      handleCaughtBackendError(e, xlsmPath);
     }
-  }, [lockPrompt, openProjectReadOnly, routeParsedError]);
+  }, [lockPrompt, openProjectReadOnly, handleCaughtBackendError]);
 
   const handleLockCancel = useCallback(() => {
     setLockPrompt(null);
@@ -187,13 +206,13 @@ function App() {
           setSaveBlockedPrompt(t("status.saveBlocked"));
           return;
         }
-        routeParsedError(parseBackendError(e));
+        handleCaughtBackendError(e, project?.xlsm_path ?? null);
       }
       // TODO: wire ConflictDialog here once the backend reports
       // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
       // is a save-time lock condition rather than a content conflict).
     },
-    [activeModule, saveModule, t, routeParsedError]
+    [activeModule, saveModule, t, handleCaughtBackendError, project?.xlsm_path]
   );
 
   return (
