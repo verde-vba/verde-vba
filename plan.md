@@ -615,8 +615,86 @@ the hook to call `save_module` directly.
 
 ## Follow-ups (out of Sprint 9 scope)
 
-- **Residual `key!` force-cast in `error-parse.test.ts:174`** —
-  still outstanding; tiny Tidy candidate carried from Sprint 8.
+- ~~**Residual `key!` force-cast in `error-parse.test.ts:174`**~~ —
+  closed in Sprint 10 (commit `dcdac42`).
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding; blocked on Verde-owned docs page decision.
+- **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
+  prefix, `"VBA"` language tag, `WelcomeScreen.tsx` `"Verde"` brand
+  headline) — still outstanding; each needs a product decision.
+- **Optional: `withLoadingState` helper** — still outstanding;
+  Sprint 4 rejected it pending rule-of-three evidence.
+- **Structured logging for `checkConflict`** — still outstanding;
+  Sprint 6 gated on telemetry.
+
+# Sprint 10 — Residual `key!` force-cast Tidy in error-parse.test
+
+## Goal
+
+Close the Sprint 8 follow-up by removing the residual non-null
+assertion (`key!`) in `src/lib/error-parse.test.ts:174`. Same
+antipattern Sprint 7 struck from `handleCloseModule`: the `!`
+bypasses TypeScript's type system without providing any runtime
+guarantee, since the `toBeDefined()` expect-assertion that
+precedes it is a test-framework check, not a type narrowing.
+
+## Scope
+
+- **Sole item**: insert an explicit `if (key === undefined) continue;`
+  narrowing guard directly after the `toBeDefined()` assertion in
+  the `toI18nKey locale contract` test, and drop the `!` on the
+  subsequent `resolve(locale, key!)` call.
+- No production-code changes. Sprint 10 is a test-file Tidy that
+  eliminates a type-system bypass — structural improvement only.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type | Summary                                                  |
+| ------- | ---- | -------------------------------------------------------- |
+| dcdac42 | test | Narrow `key` type guard in `error-parse.test` (drop `!`) |
+| (this)  | docs | Record Sprint 10 plan and outcomes                       |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **32** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 10)
+
+## Key decisions
+
+- **`continue` over `throw` or early-`return`**: the `toBeDefined()`
+  line above already emits the test failure if `key` is undefined;
+  a subsequent `throw` would double-report the same regression, and
+  an early `return` would break out of the surrounding `for...of`
+  over `samples` rather than skipping the individual iteration. A
+  plain `continue` signals "this iteration is already failed by the
+  prior assertion, don't spam further expectations" while preserving
+  fan-out across remaining sample inputs.
+- **Guard immediately after `toBeDefined()`, not inside the locale
+  loop**: placing it at the sample-iteration boundary narrows `key`
+  for the entire inner locale loop in a single statement, avoiding
+  a repeated guard on each branch of `if (expectsTitleMessage)`.
+- **`toBeDefined()` kept alongside the narrowing guard**: removing
+  the expect-assertion would hide regressions where `toI18nKey`
+  starts returning `undefined` for an input that was previously
+  structured — the assertion is the *signal*, the guard is the
+  *type-system bridge*. Both are load-bearing.
+- **Parallel to Sprint 7's `null!` removal**: Sprint 7 widened the
+  `setActiveModule` signature to eliminate a production-side `null!`;
+  Sprint 10 adds a narrowing guard in test code to eliminate a
+  test-side `key!`. Same underlying pattern (type-system bypass),
+  different surface — and the test-side fix doesn't need a signature
+  widening because `toI18nKey`'s return type is already correct; the
+  test just needed to *respect* it.
+- **Sprint 10 intentionally single-item, again**: continues the
+  Sprint 7/8/9 cadence of closing one follow-up per sprint when the
+  remaining backlog is either blocked on external input
+  (TrustGuideDialog docs page, low-priority product decisions) or
+  explicitly rejected pending future evidence (`withLoadingState`,
+  structured `checkConflict` logging).
+
+## Follow-ups (out of Sprint 10 scope)
+
 - **`TrustGuideDialog` URL / docs reference review** — still
   outstanding; blocked on Verde-owned docs page decision.
 - **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
