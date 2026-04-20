@@ -57,4 +57,39 @@ describe("parseBackendError", () => {
       message: "undefined",
     });
   });
+
+  it("parses a project-not-found error, preserving the detail suffix", () => {
+    const result = parseBackendError("project not found: abc123def456");
+    expect(result).toEqual({
+      kind: "projectNotFound",
+      detail: " abc123def456",
+    });
+  });
+
+  it("parses a project-metadata-corrupted error, preserving the parse-error cause", () => {
+    const result = parseBackendError(
+      "project metadata is corrupted: expected value at line 1 column 1",
+    );
+    expect(result).toEqual({
+      kind: "projectCorrupted",
+      detail: " expected value at line 1 column 1",
+    });
+  });
+
+  it("unwraps Error instances when parsing project-not-found", () => {
+    const result = parseBackendError(new Error("project not found: xyz"));
+    expect(result).toEqual({
+      kind: "projectNotFound",
+      detail: " xyz",
+    });
+  });
+
+  it("treats messages mentioning 'project not found' mid-string as generic, not projectNotFound", () => {
+    const input = "unexpected: project not found somewhere in the middle";
+    const result = parseBackendError(input);
+    expect(result).toEqual({
+      kind: "generic",
+      message: input,
+    });
+  });
 });
