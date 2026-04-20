@@ -1,9 +1,21 @@
 import { afterEach, describe, it, expect } from "vitest";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
-import { getProjectDir, handleGetSymbols, TOOLS } from "./server.js";
+import {
+  getProjectDir,
+  handleDeleteModule,
+  handleGetLines,
+  handleGetModuleOutline,
+  handleGetProcedure,
+  handleGetSymbols,
+  handlePatchLines,
+  handlePatchProcedure,
+  handleWriteModule,
+  safeModulePath,
+  TOOLS,
+} from "./server.js";
 
 // Sanity test: confirms vitest is wired up correctly for the mcp package.
 // server.js now guards main() with an isMainModule check, so importing
@@ -29,6 +41,168 @@ describe("mcp test infrastructure", () => {
 describe("MCP tool registration", () => {
   it("registers get_symbols in TOOLS list", () => {
     expect(TOOLS.some((t) => t.name === "get_symbols")).toBe(true);
+  });
+});
+
+// PBI #1 (Sprint 18): path-traversal hardening. All handlers must reject
+// `args.module` values that escape projectDir or carry non-module extensions.
+// The attack vector is AI-controlled MCP arguments (prompt injection in a
+// workbook comment coercing the model to call write_module with
+// `../../.../Startup/pwn.bat`). `safeModulePath` is the single choke point.
+describe("safeModulePath", () => {
+  let tmpDir;
+
+  afterEach(() => {
+    if (tmpDir && existsSync(tmpDir)) {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a plain module filename with .bas extension", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    const got = safeModulePath(tmpDir, "Module1.bas");
+    expect(got).toBe(join(tmpDir, "Module1.bas"));
+  });
+
+  it("accepts .cls and .frm extensions", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    expect(() => safeModulePath(tmpDir, "Customer.cls")).not.toThrow();
+    expect(() => safeModulePath(tmpDir, "frmInput.frm")).not.toThrow();
+  });
+
+  it("rejects parent-directory traversal", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    expect(() => safeModulePath(tmpDir, "../escape.bas")).toThrow(
+      /invalid module/i
+    );
+    expect(() => safeModulePath(tmpDir, "../../../etc/passwd")).toThrow(
+      /invalid module/i
+    );
+  });
+
+  it("rejects absolute paths", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    expect(() => safeModulePath(tmpDir, "/etc/passwd")).toThrow(
+      /invalid module/i
+    );
+    expect(() =>
+      safeModulePath(tmpDir, "C:\\Windows\\System32\\config\\SAM")
+    ).toThrow(/invalid module/i);
+  });
+
+  it("rejects path separators embedded in the name", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    expect(() => safeModulePath(tmpDir, "sub/mod.bas")).toThrow(
+      /invalid module/i
+    );
+    expect(() => safeModulePath(tmpDir, "sub\\mod.bas")).toThrow(
+      /invalid module/i
+    );
+  });
+
+  it("rejects unknown extensions", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    expect(() => safeModulePath(tmpDir, "pwn.bat")).toThrow(/invalid module/i);
+    expect(() => safeModulePath(tmpDir, "noext")).toThrow(/invalid module/i);
+    expect(() => safeModulePath(tmpDir, "Module.txt")).toThrow(
+      /invalid module/i
+    );
+  });
+
+  it("rejects empty / null / non-string input", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-safe-"));
+    expect(() => safeModulePath(tmpDir, "")).toThrow(/invalid module/i);
+    expect(() => safeModulePath(tmpDir, null)).toThrow(/invalid module/i);
+    expect(() => safeModulePath(tmpDir, undefined)).toThrow(/invalid module/i);
+    expect(() => safeModulePath(tmpDir, 42)).toThrow(/invalid module/i);
+  });
+});
+
+// Each handler that composes `join(projectDir, args.module)` must surface
+// a validation error instead of silently operating on the escaped path.
+describe("handlers reject path traversal", () => {
+  let tmpDir;
+
+  afterEach(() => {
+    if (tmpDir && existsSync(tmpDir)) {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleWriteModule refuses to write outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    expect(() =>
+      handleWriteModule(tmpDir, {
+        module: "../outside.bas",
+        content: "Sub Pwn()\nEnd Sub\n",
+      })
+    ).toThrow(/invalid module/i);
+
+    // Blast-radius verification: the escape target must not have been created.
+    const escapeTarget = join(dirname(tmpDir), "outside.bas");
+    expect(existsSync(escapeTarget)).toBe(false);
+  });
+
+  it("handleDeleteModule refuses to delete outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    const outsideVictim = join(dirname(tmpDir), "victim.bas");
+    writeFileSync(outsideVictim, "keep me\n", "utf-8");
+    try {
+      expect(() =>
+        handleDeleteModule(tmpDir, { module: "../victim.bas" })
+      ).toThrow(/invalid module/i);
+      expect(existsSync(outsideVictim)).toBe(true);
+      expect(readFileSync(outsideVictim, "utf-8")).toBe("keep me\n");
+    } finally {
+      if (existsSync(outsideVictim)) rmSync(outsideVictim);
+    }
+  });
+
+  it("handleGetProcedure refuses to read outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    expect(() =>
+      handleGetProcedure(tmpDir, {
+        module: "../secret.bas",
+        procedure: "Foo",
+      })
+    ).toThrow(/invalid module/i);
+  });
+
+  it("handleGetLines refuses to read outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    expect(() =>
+      handleGetLines(tmpDir, { module: "../secret.bas", start: 1, end: 5 })
+    ).toThrow(/invalid module/i);
+  });
+
+  it("handleGetModuleOutline refuses to read outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    expect(() =>
+      handleGetModuleOutline(tmpDir, { module: "../secret.bas" })
+    ).toThrow(/invalid module/i);
+  });
+
+  it("handlePatchProcedure refuses to write outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    expect(() =>
+      handlePatchProcedure(tmpDir, {
+        module: "../outside.bas",
+        procedure: "Foo",
+        newSource: "Sub Foo()\nEnd Sub\n",
+      })
+    ).toThrow(/invalid module/i);
+  });
+
+  it("handlePatchLines refuses to write outside projectDir", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "verde-traversal-"));
+    expect(() =>
+      handlePatchLines(tmpDir, {
+        module: "../outside.bas",
+        start: 1,
+        end: 1,
+        newContent: "x",
+      })
+    ).toThrow(/invalid module/i);
   });
 });
 

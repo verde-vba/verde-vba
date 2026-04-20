@@ -7,8 +7,33 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, unlinkSync } from "fs";
-import { join, basename, extname } from "path";
+import { join, basename, extname, resolve, sep } from "path";
 import { createHash } from "crypto";
+
+// Sprint 18 / PBI #1 — path-traversal hardening.
+//
+// All tool handlers that compose `join(projectDir, args.module)` route the
+// raw argument through `safeModulePath` first. `args.module` is controlled
+// by the MCP client (an AI model), so a prompt injection in workbook source
+// could coerce the model into passing `../../.../Startup/pwn.bat` for
+// `write_module` or `/etc/passwd` for a reader. Two checks together close
+// both vectors: a whitelist regex on the raw name (kills separators and
+// unexpected extensions up front) and a prefix containment check on the
+// resolved absolute path (defense-in-depth against anything the regex
+// missed, including `resolve`'s platform-specific edge cases).
+const MODULE_NAME_RE = /^[A-Za-z0-9_.-]+\.(bas|cls|frm)$/;
+
+export function safeModulePath(projectDir, rawName) {
+  if (typeof rawName !== "string" || !MODULE_NAME_RE.test(rawName)) {
+    throw new Error(`invalid module name: ${JSON.stringify(rawName)}`);
+  }
+  const abs = resolve(projectDir, rawName);
+  const root = resolve(projectDir) + sep;
+  if (!abs.startsWith(root) && abs !== resolve(projectDir)) {
+    throw new Error(`invalid module name (escapes projectDir): ${rawName}`);
+  }
+  return abs;
+}
 
 const server = new Server(
   { name: "verde", version: "0.1.0" },
@@ -56,7 +81,7 @@ export function handleGetProjectOutline(projectDir, _args) {
 }
 
 export function handleGetModuleOutline(projectDir, args) {
-  const filePath = join(projectDir, args.module);
+  const filePath = safeModulePath(projectDir, args.module);
   if (!existsSync(filePath))
     return { content: [{ type: "text", text: "Module not found" }] };
   const content = readFileSync(filePath, "utf-8");
@@ -85,7 +110,7 @@ export function handleGetModuleOutline(projectDir, args) {
 }
 
 export function handleGetProcedure(projectDir, args) {
-  const filePath = join(projectDir, args.module);
+  const filePath = safeModulePath(projectDir, args.module);
   if (!existsSync(filePath))
     return { content: [{ type: "text", text: "Module not found" }] };
   const content = readFileSync(filePath, "utf-8");
@@ -120,7 +145,7 @@ export function handleGetProcedure(projectDir, args) {
 }
 
 export function handleGetLines(projectDir, args) {
-  const filePath = join(projectDir, args.module);
+  const filePath = safeModulePath(projectDir, args.module);
   if (!existsSync(filePath))
     return { content: [{ type: "text", text: "Module not found" }] };
   const lines = readFileSync(filePath, "utf-8").split("\n");
@@ -285,7 +310,7 @@ export function handleGetSymbols(projectDir, _args) {
 }
 
 export function handlePatchProcedure(projectDir, args) {
-  const filePath = join(projectDir, args.module);
+  const filePath = safeModulePath(projectDir, args.module);
   if (!existsSync(filePath))
     return { content: [{ type: "text", text: "Module not found" }] };
   const content = readFileSync(filePath, "utf-8");
@@ -313,7 +338,7 @@ export function handlePatchProcedure(projectDir, args) {
 }
 
 export function handlePatchLines(projectDir, args) {
-  const filePath = join(projectDir, args.module);
+  const filePath = safeModulePath(projectDir, args.module);
   if (!existsSync(filePath))
     return { content: [{ type: "text", text: "Module not found" }] };
   const lines = readFileSync(filePath, "utf-8").split("\n");
@@ -323,13 +348,16 @@ export function handlePatchLines(projectDir, args) {
 }
 
 export function handleWriteModule(projectDir, args) {
-  writeFileSync(join(projectDir, args.module), args.content, "utf-8");
+  const filePath = safeModulePath(projectDir, args.module);
+  writeFileSync(filePath, args.content, "utf-8");
   return { content: [{ type: "text", text: "Module written" }] };
 }
 
 export function handleCreateModule(projectDir, args) {
   const filename = `${args.name}.${args.type}`;
-  const filePath = join(projectDir, filename);
+  // `args.name` is model-controlled too — route through safeModulePath so a
+  // name like "../evil" cannot create files outside projectDir.
+  const filePath = safeModulePath(projectDir, filename);
   if (existsSync(filePath))
     return { content: [{ type: "text", text: "Module already exists" }] };
   const header =
@@ -343,7 +371,7 @@ export function handleCreateModule(projectDir, args) {
 }
 
 export function handleDeleteModule(projectDir, args) {
-  const filePath = join(projectDir, args.module);
+  const filePath = safeModulePath(projectDir, args.module);
   if (!existsSync(filePath))
     return { content: [{ type: "text", text: "Module not found" }] };
   unlinkSync(filePath);
