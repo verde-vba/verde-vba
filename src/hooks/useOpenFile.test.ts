@@ -8,7 +8,7 @@ function makeOptions(overrides: Partial<Parameters<typeof useOpenFile>[0]> = {})
     openProject: vi.fn(async () => {}),
     forceOpenProject: vi.fn(async () => {}),
     openProjectReadOnly: vi.fn(async () => {}),
-    routeParsedError: vi.fn() as (p: ParsedError) => void,
+    routeParsedError: vi.fn<(p: ParsedError) => void>(),
     fileTypeLabel: "Excel Macro",
     ...overrides,
   };
