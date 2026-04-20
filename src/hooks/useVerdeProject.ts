@@ -31,8 +31,29 @@ export function useVerdeProject() {
       setState((s) => ({
         ...s,
         loading: false,
-        error: String(e),
+        error: e instanceof Error ? e.message : String(e),
       }));
+      throw e;
+    }
+  }, []);
+
+  const forceOpenProject = useCallback(async (xlsmPath: string) => {
+    setState((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const project = await commands.forceOpenProject(xlsmPath);
+      setState({
+        project,
+        activeModule: project.modules[0] ?? null,
+        loading: false,
+        error: null,
+      });
+    } catch (e) {
+      setState((s) => ({
+        ...s,
+        loading: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+      throw e;
     }
   }, []);
 
@@ -46,7 +67,11 @@ export function useVerdeProject() {
       try {
         await commands.saveModule(state.project.project_id, filename, content);
       } catch (e) {
-        setState((s) => ({ ...s, error: String(e) }));
+        setState((s) => ({
+          ...s,
+          error: e instanceof Error ? e.message : String(e),
+        }));
+        throw e;
       }
     },
     [state.project]
@@ -64,6 +89,7 @@ export function useVerdeProject() {
   return {
     ...state,
     openProject,
+    forceOpenProject,
     setActiveModule,
     saveModule,
     syncToExcel,
