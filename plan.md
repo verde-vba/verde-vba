@@ -278,5 +278,87 @@ are priority-ranked for future sprint planning.
 - **`TrustGuideDialog` URL / docs reference review** — still
   outstanding.
 - **`handleCloseModule` `null!` narrowing** — still outstanding.
-- **`checkConflict` silent failure path** — still outstanding.
+- ~~**`checkConflict` silent failure path**~~ — closed in Sprint 6
+  (commit `fix(hooks): warn on checkConflict silent failure`).
 - **Optional: `withLoadingState` helper** — still outstanding.
+
+# Sprint 6 — A11y on TabBar close button and checkConflict visibility
+
+## Goal
+
+Close two small-scope follow-ups carried from Sprint 3–5: surface the
+per-tab close button to screen readers with a translated accessible
+name, and stop hiding a real `checkConflict` regression behind the
+macOS / no-Excel swallow.
+
+## Scope
+
+- **A-stream**: add `aria-label={t("common.close")}` to the TabBar
+  per-tab close button (glyph-only `×` has no accessible name). Add
+  the new `common.close` locale key in en/ja.
+- **B-stream**: convert the silent `checkConflict` catch in `runOpen`
+  into a `console.warn` that preserves the swallow invariant
+  (platform-missing fallback still opens the file) while tagging the
+  failure for devtools inspection.
+- Preserve Kent Beck TDD / Tidy First discipline — every behavior
+  change starts from a failing test.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type        | Summary                                                                      |
+| ------- | ----------- | ---------------------------------------------------------------------------- |
+| (this)  | feat(ui)    | Add `aria-label` to TabBar close button + `common.close` locale key          |
+| (this)  | test(ui)    | Characterize TabBar close-button accessible name wiring                      |
+| (this)  | fix(hooks)  | Warn on checkConflict silent failure while preserving the swallow invariant  |
+| (this)  | test(hooks) | Characterize `console.warn` + `state.conflict === null` under check failure  |
+| (this)  | docs        | Record Sprint 6 plan and outcomes                                            |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **29** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 6)
+
+## Key decisions
+
+- **`common.close` chosen over reusing `common.dismiss`**: semantically
+  distinct — `dismiss` is "revoke/suppress a prompt" (Banner), `close`
+  is "close this surface" (tab, future dialog close icon). The ja
+  translations happen to collide on "閉じる" today but the English
+  split keeps the i18n surface honest for future per-locale drift.
+- **`ja.common.dismiss` deliberately left at "閉じる"**: changing the
+  live user-visible string while adding a new key would have been a
+  scope creep into UX wording. Any re-word is a separate decision.
+- **`type="button"` added alongside `aria-label`**: the close button
+  lives inside a clickable tab `<div>`, and a bare `<button>` defaults
+  to `type="submit"` which would break anyone who later wraps TabBar
+  in a form. The two attrs landed together as a single a11y hardening.
+- **`console.warn` over `throw` for `checkConflict`**: throwing would
+  regress the macOS / no-Excel fallback that `runOpen` deliberately
+  preserves. The warn keeps the swallow invariant AND makes a real
+  regression observable in devtools — this is the minimum-viable
+  "stop hiding" step. A structured logger / user-facing toast is a
+  future option if the signal proves noisy.
+- **Sprint 6 pairs two independent minimal-risk items**: neither item
+  was large enough for its own sprint, and the TDD shapes differ
+  (RTL accessible-name assertion vs `vi.spyOn(console, "warn")`), so
+  one failing does not block the other. This is the "bundle small
+  independents" pattern worth repeating when the backlog is all
+  follow-ups of similar size.
+
+## Follow-ups (out of Sprint 6 scope)
+
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding from Sprint 3/4/5.
+- **`handleCloseModule` `null!` narrowing** — still outstanding from
+  Sprint 3/4/5.
+- **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
+  prefix, `"VBA"` language tag, `WelcomeScreen.tsx` `"Verde"` brand
+  headline) — still outstanding; each needs a product decision rather
+  than a mechanical swap.
+- **Optional: `withLoadingState` helper** — still outstanding from
+  Sprint 4.
+- **Structured logging for `checkConflict`**: if the warn proves
+  noisy (e.g. every macOS open logs it), replace with a gated
+  debug-channel log or surface once per session. Not a candidate
+  until telemetry shows the noise.
