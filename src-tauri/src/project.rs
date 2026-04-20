@@ -684,6 +684,26 @@ mod tests {
     }
 
     #[test]
+    fn is_excel_open_error_ignores_hresult_tag_for_unrelated_codes() {
+        // E_ACCESSDENIED (0x80070005) is a separate failure mode, not
+        // Excel-holding-the-file. A tag carrying it must not flip the
+        // classifier into Excel-open — otherwise every permission error
+        // would erroneously prompt "close Excel and retry".
+        let stderr = "Access is denied.\nVERDE_HRESULT=0x80070005\n";
+        assert!(!ProjectManager::is_excel_open_error(stderr));
+    }
+
+    #[test]
+    fn is_excel_open_error_falls_back_to_substring_when_tag_absent() {
+        // PS failure paths that exit before entering the try block never
+        // emit VERDE_HRESULT. The English-substring fallback must still
+        // classify those cases — otherwise removing the fallback in a
+        // future refactor would silently drop real Excel-open detections.
+        let stderr_without_tag = "The workbook is being used by another process.";
+        assert!(ProjectManager::is_excel_open_error(stderr_without_tag));
+    }
+
+    #[test]
     fn is_excel_open_error_detects_japanese_locale_via_hresult_tag() {
         // Sprint 25 / PBI #17: the Sprint-18 pinned-negative is flipped.
         // A Japanese-locale COM error arrives with localised prose that
