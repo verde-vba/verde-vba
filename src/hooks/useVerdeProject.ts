@@ -126,7 +126,14 @@ export function useVerdeProject() {
     try {
       await commands.syncToExcel(state.project.project_id);
     } catch (e) {
-      setState((s) => ({ ...s, error: String(e) }));
+      // Mirror runOpen/saveModule: unwrap Error.message so the raw
+      // backend substring is preserved, letting parseBackendError's
+      // prefix matcher recognize it. `String(e)` would prepend
+      // "Error: " for Error instances and break that match.
+      setState((s) => ({
+        ...s,
+        error: e instanceof Error ? e.message : String(e),
+      }));
     }
   }, [state.project]);
 
