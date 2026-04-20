@@ -525,14 +525,98 @@ pinned either side of the coupling before this sprint.
 
 ## Follow-ups (out of Sprint 8 scope)
 
-- **App.tsx consumer-side test for the saveBlocked banner path** —
-  requires stubbing the openProjectReadOnly flow through the dynamic
-  `plugin-dialog` import plus the Editor save-trigger, a wider
-  scaffold than a single-item sprint. Candidate for Sprint 9.
+- ~~**App.tsx consumer-side test for the saveBlocked banner path**~~
+  — closed in Sprint 9 (commit `fc276f8`).
 - **Residual `key!` force-cast in `error-parse.test.ts:174`** —
   narrow the `key: string | undefined` via an explicit guard so the
   test file stops carrying the same "paper over the signature"
   antipattern Sprint 7 removed from the hook. Tiny Tidy candidate.
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding; blocked on Verde-owned docs page decision.
+- **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
+  prefix, `"VBA"` language tag, `WelcomeScreen.tsx` `"Verde"` brand
+  headline) — still outstanding; each needs a product decision.
+- **Optional: `withLoadingState` helper** — still outstanding;
+  Sprint 4 rejected it pending rule-of-three evidence.
+- **Structured logging for `checkConflict`** — still outstanding;
+  Sprint 6 gated on telemetry.
+
+# Sprint 9 — App-side saveBlocked banner consumer characterization
+
+## Goal
+
+Close the Sprint 8 follow-up by pinning the App-side consumer of the
+`SAVE_BLOCKED_READONLY` sentinel. Sprint 8 pinned the hook throw
+(Error instance, exact message, short-circuit before invoke); this
+sprint adds the diagonal: App's `handleSave` catch-site matches the
+exact message, translates it, and renders the saveBlocked Banner —
+without leaking the raw sentinel into the DOM and without bypassing
+the hook to call `save_module` directly.
+
+## Scope
+
+- **Sole item**: add one App-level characterization test that walks
+  the full consumer path (Open .xlsm → LOCKED → LockDialog →
+  "Open Read-Only" → Editor stub save trigger → saveBlocked Banner).
+- Three invariants land in one test:
+  1. Banner body equals `en.json → status.saveBlocked`
+  2. The `SAVE_BLOCKED_READONLY` literal never reaches the DOM
+  3. `save_module` is never dispatched through the `invoke` mock
+- Intentionally **no** production-code changes. Sprint 9 is a
+  regression-gate install only.
+- The test reuses the existing Editor stub, `@tauri-apps/plugin-dialog`
+  mock, and `initI18n("en")` scaffold from `App.test.tsx`. No new
+  test infrastructure introduced.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type     | Summary                                                                     |
+| ------- | -------- | --------------------------------------------------------------------------- |
+| fc276f8 | test(ui) | Pin saveBlocked banner render path for SAVE_BLOCKED_READONLY consumer side |
+| (this)  | docs     | Record Sprint 9 plan and outcomes                                           |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **32** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 9)
+
+## Key decisions
+
+- **Three invariants in one test, not three tests**: the flow prelude
+  (dialog → LOCKED → LockDialog → Open Read-Only → save trigger) is
+  five fireEvent/findBy calls. Splitting one assertion per test would
+  have triplicated the prelude for ~3× the slow-test cost without
+  improving failure localization — each invariant's assertion message
+  already names the specific gate it guards.
+- **`invoke` bypass-check (invariant 3) is diagonal, not redundant**:
+  the hook-side Sprint 8 pin already asserts `save_module` is not
+  called. Re-asserting here catches a *different* regression:
+  "someone added a `tauri-commands.saveModule(...)` call in App that
+  bypasses the hook entirely." That path is invisible to the hook
+  test because the hook wouldn't even run.
+- **LOCKED-forced open is the only route to readonly state**: App
+  exposes `openProjectReadOnly` exclusively via the LockDialog's
+  "Open Read-Only" button. Going through the lock flow is not test
+  awkwardness — it's the real product path users take. The scaffold
+  doubles as an implicit lock-dialog-to-readonly smoke test.
+- **`findByRole("alert")` is unambiguous**: the readOnly status strip
+  uses `role="status"`, the Banner uses `role="alert"`, and no other
+  alert surfaces are active in this flow. Probing Banner.tsx
+  (probe 3/3) confirmed the role attribute before writing the
+  selector, avoiding a guesswork-driven false positive.
+- **Negative assertion on the sentinel literal (invariant 2) is
+  tight**: `not.toHaveTextContent("SAVE_BLOCKED_READONLY")` fails if
+  a future change ever routes the Error's `.message` to the DOM
+  (e.g. via `setErrorBanner({ kind: "generic", message: e.message })`
+  bypassing the sentinel check). The guard is cheap and catches a
+  class of regressions that the positive text assertion alone would
+  miss (the banner could show BOTH texts).
+
+## Follow-ups (out of Sprint 9 scope)
+
+- **Residual `key!` force-cast in `error-parse.test.ts:174`** —
+  still outstanding; tiny Tidy candidate carried from Sprint 8.
 - **`TrustGuideDialog` URL / docs reference review** — still
   outstanding; blocked on Verde-owned docs page decision.
 - **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
