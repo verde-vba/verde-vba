@@ -3,7 +3,7 @@
 # Install all dependencies
 setup:
     bun install
-    cd mcp && npm install
+    cd mcp && bun install
 
 # Start Tauri dev server
 dev:
@@ -36,7 +36,7 @@ clippy:
 
 # Start MCP server (for AI clients)
 serve project:
-    VERDE_PROJECT="{{project}}" node mcp/server.js
+    VERDE_PROJECT="{{project}}" bun mcp/server.js
 
 # Clean build artifacts
 clean:

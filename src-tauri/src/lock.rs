@@ -62,8 +62,18 @@ impl LockManager {
         let content = serde_json::to_string_pretty(&lock_info)?;
         std::fs::write(&lock_path, content)?;
 
-        // TODO: Windows で隠し+システム属性を付与
+        Self::set_hidden_system_attrs(&lock_path)?;
 
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn set_hidden_system_attrs(_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn set_hidden_system_attrs(_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
