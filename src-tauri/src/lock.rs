@@ -164,6 +164,64 @@ impl LockManager {
         whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string())
     }
 
+    /// Returns the basename of the executable image backing `pid`, lowercased.
+    ///
+    /// Sprint 26 durable invariant on `None` semantics (see plan.md
+    /// Sprint 26 Key decisions): the meaning of `None` is resolved by
+    /// `#[cfg]`, not the value itself.
+    ///
+    /// - **Windows/Linux**: `None` means the provider *successfully observed*
+    ///   the PID and reports "no matching image" — i.e. **verified not-us**.
+    ///   Callers may treat this as stale without further checks.
+    /// - **macOS**: `None` means the provider **cannot verify** (no cheap
+    ///   native API was adopted; `libproc` / `ps` shell-out were rejected
+    ///   in Sprint 24). Callers must fall back to `is_pid_alive + TTL`.
+    ///
+    /// This invariant is enforced by `is_stale_with_provider` in Sprint 27
+    /// commit 4 and pinned by `is_stale_macos_fallback_respects_ttl` in
+    /// commit 5.
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    pub(crate) fn process_image_basename(pid: u32) -> Option<String> {
+        use windows::Win32::System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+            PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+            let mut buf = [0u16; 260];
+            let mut len = buf.len() as u32;
+            let result = QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), &mut buf, &mut len);
+            let _ = windows::Win32::Foundation::CloseHandle(handle);
+            result.ok()?;
+            let full = String::from_utf16_lossy(&buf[..len as usize]);
+            Path::new(&full)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[allow(dead_code)]
+    pub(crate) fn process_image_basename(pid: u32) -> Option<String> {
+        let raw = std::fs::read_to_string(format!("/proc/{}/comm", pid)).ok()?;
+        let trimmed = raw.trim_end_matches(['\n', '\r']).trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_lowercase())
+        }
+    }
+
+    /// macOS: no cheap native image-name API was adopted (Sprint 24 durable
+    /// rejection of `libproc` FFI and `ps` shell-out). Always returns `None`
+    /// meaning **"cannot verify"**; callers fall back to TTL.
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    pub(crate) fn process_image_basename(_pid: u32) -> Option<String> {
+        None
+    }
+
     #[cfg(windows)]
     pub(crate) fn is_pid_alive(pid: u32) -> bool {
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
@@ -300,6 +358,39 @@ mod tests {
             LockManager::is_stale(&stale_foreign),
             "TTL-expired foreign-host lock should be reapable to avoid permanent wedge"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn process_image_basename_returns_non_empty_for_self_on_windows() {
+        let self_pid = std::process::id();
+        let name = LockManager::process_image_basename(self_pid);
+        assert!(
+            name.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+            "provider must observe self image on Windows, got {:?}",
+            name
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_image_basename_returns_non_empty_for_self_on_linux() {
+        let self_pid = std::process::id();
+        let name = LockManager::process_image_basename(self_pid);
+        assert!(
+            name.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+            "provider must observe self image via /proc/<pid>/comm on Linux, got {:?}",
+            name
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn process_image_basename_returns_none_on_macos() {
+        // macOS durable decision (Sprint 24): no cheap native API adopted.
+        // `None` means "cannot verify"; is_stale_with_provider falls back to TTL.
+        let self_pid = std::process::id();
+        assert_eq!(LockManager::process_image_basename(self_pid), None);
     }
 
     #[test]
