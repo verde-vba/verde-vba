@@ -362,3 +362,92 @@ macOS / no-Excel swallow.
   noisy (e.g. every macOS open logs it), replace with a gated
   debug-channel log or surface once per session. Not a candidate
   until telemetry shows the noise.
+
+# Sprint 7 — `setActiveModule` signature honesty
+
+## Goal
+
+Replace the `null!` force-cast at `App.tsx` `handleCloseModule` with
+a signature-level fix: widen `useVerdeProject.setActiveModule` to
+accept `ModuleInfo | null` so the contract matches the actual
+runtime behavior, and remove the non-null assertion that was only
+there to appease the narrower type.
+
+## Scope
+
+- **A-stream**: widen `setActiveModule` signature from
+  `(module: ModuleInfo)` to `(module: ModuleInfo | null)` — pure
+  structural change, no runtime diff (`setState` already stores
+  `null` transparently).
+- **B-stream**: pin the widened contract with a hook-level
+  characterization test that exercises both `setActiveModule(mod)`
+  and `setActiveModule(null)` transitions.
+- **C-stream**: drop the `null!` assertion in `App.tsx:189` —
+  `?? null` is now type-correct.
+- Preserve Kent Beck TDD / Tidy First discipline: the RED phase was
+  the pre-widening `tsc --noEmit` failure when the test was drafted;
+  committed history lands the signature widening first so every HEAD
+  stays green.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type          | Summary                                                                     |
+| ------- | ------------- | --------------------------------------------------------------------------- |
+| 71cf499 | refactor(hooks) | Widen `setActiveModule` signature to accept `ModuleInfo \| null`          |
+| 08c1670 | test(hooks)   | Characterize `setActiveModule(null)` clears active module                   |
+| 2e31204 | refactor(ui)  | Drop `null!` force-cast from `handleCloseModule`                            |
+| (this)  | docs          | Record Sprint 7 plan and outcomes                                           |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **30** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 7)
+
+## Key decisions
+
+- **Signature widening first, test second, Tidy third**: the
+  narrative TDD order is "write test (RED: tsc fails) → widen
+  (GREEN) → tidy". But the first landed commit is the signature
+  widening so that every HEAD is clean — the test then lands on top
+  of an already-widened contract, and the App-side Tidy lands last.
+  This preserves bisect-ability at the cost of one bit of TDD
+  narrative (captured here).
+- **`null!` was a type-system bypass, not a runtime guard**: the
+  non-null assertion on the `null` literal lets TypeScript treat the
+  expression as `never`, which is assignable to any type. That is
+  *exactly* the "paper over the signature" antipattern the sprint
+  targets. Removing the `!` without widening would have introduced a
+  type error; widening without removing the `!` would have left the
+  marker in place as dead weight for future readers.
+- **Test pins both transitions, not just null**: asserting only
+  `setActiveModule(null) → activeModule === null` would leave open
+  whether the reducer handles the round-trip correctly. Flipping to
+  a real `ModuleInfo` first and then back to null proves the reducer
+  honors both directions via the same code path.
+- **No `setActiveModule(null)` call site adopted yet**: the widened
+  signature enables, but does not require, replacing the
+  `?? null!`-style dance anywhere else. The codebase only had one
+  such site (`handleCloseModule`); if a future feature needs to
+  clear the active module without going through the close flow, the
+  contract now supports it cleanly.
+- **Sprint 7 was intentionally single-item**: four Sprint 6
+  follow-ups remained, but three of them (`TrustGuideDialog` URL,
+  `withLoadingState` helper, structured `checkConflict` logging)
+  were blocked on external input (product decision / telemetry) or
+  explicitly rejected in prior sprints. Bundling only for the sake
+  of filling a sprint would have forced scope creep; landing one
+  clean follow-up keeps velocity honest.
+
+## Follow-ups (out of Sprint 7 scope)
+
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding; blocked on Verde-owned docs page decision.
+- **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
+  prefix, `"VBA"` language tag, `WelcomeScreen.tsx` `"Verde"` brand
+  headline) — still outstanding; each needs a product decision.
+- **Optional: `withLoadingState` helper** — still outstanding;
+  Sprint 4 rejected it pending rule-of-three evidence beyond the
+  current three mutation hooks.
+- **Structured logging for `checkConflict`** — still outstanding;
+  Sprint 6 gated on telemetry.
