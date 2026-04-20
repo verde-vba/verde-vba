@@ -158,5 +158,57 @@ describe("useVerdeProject", () => {
 
       expect(result.current.loading).toBe(false);
     });
+
+    it("sets loading to true while the invoke is pending and back to false on resolve", async () => {
+      // Arrange: open succeeds and conflict check returns empty, then we
+      // stall the next sync_to_excel invoke behind a deferred promise so
+      // we can observe the intermediate `loading: true` state. Without a
+      // manual resolver the invoke would settle immediately and the
+      // pending-state window would close before we could read it.
+      const project = makeProject();
+      let resolveInvoke: ((value: unknown) => void) | undefined;
+      const pending = new Promise((r) => {
+        resolveInvoke = r;
+      });
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "open_project") return Promise.resolve(project);
+        if (cmd === "check_conflict") return Promise.resolve([]);
+        if (cmd === "sync_to_excel") return pending;
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      });
+
+      const { result } = renderHook(() => useVerdeProject());
+
+      // Sanity: loading starts false so the mid-flight assertion below
+      // can't be trivially satisfied by an initial-state coincidence.
+      expect(result.current.loading).toBe(false);
+
+      await act(async () => {
+        await result.current.openProject(project.xlsm_path);
+      });
+      await waitFor(() => expect(result.current.project).not.toBeNull());
+
+      // Kick off the call without awaiting so the invoke stays pending.
+      // Wrapping in `act` flushes the setState(loading: true) that runs
+      // synchronously before the awaited invoke yields.
+      let syncPromise: Promise<void> | undefined;
+      act(() => {
+        syncPromise = result.current.syncToExcel();
+      });
+
+      // Assert: during the pending window, loading must be true. This is
+      // the contract the finally clause relies on — it only makes sense if
+      // the entry path first flips the flag on.
+      expect(result.current.loading).toBe(true);
+
+      // Resolve the deferred invoke and let React flush the finally's
+      // setState(loading: false) before we assert the cleared state.
+      await act(async () => {
+        resolveInvoke?.(null);
+        await syncPromise;
+      });
+
+      expect(result.current.loading).toBe(false);
+    });
   });
 });
