@@ -1,7 +1,3 @@
-// TODO: Add unit tests once a frontend test harness (vitest) is configured.
-// Currently only the mcp/ workspace has vitest installed; the root frontend
-// project does not. See task: introduce vitest at the frontend level.
-
 /**
  * Structured representation of an error returned by the Tauri backend.
  *
