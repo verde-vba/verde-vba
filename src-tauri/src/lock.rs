@@ -39,6 +39,39 @@ pub(crate) fn is_stale_by_ttl(locked_at: &str, now: DateTime<Utc>) -> bool {
     delta.num_hours() > LOCK_STALE_AFTER_HOURS
 }
 
+/// OS-specific basename expected for a same-machine lock holder.
+/// Compared case-insensitively against the PID's image name.
+/// Wired into `is_stale` via `is_stale_with_provider` in Sprint 27 commit 4.
+#[cfg(windows)]
+#[allow(dead_code)]
+pub(crate) const EXPECTED_BASENAME: &str = "verde.exe";
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+pub(crate) const EXPECTED_BASENAME: &str = "verde";
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+pub(crate) const EXPECTED_BASENAME: &str = "verde";
+
+/// Pure: decides staleness from an observed image basename.
+///
+/// Sprint 26 durable invariant (see plan.md Sprint 26 Key decisions):
+/// this helper's `None` input means **"verified not-us"** — the caller
+/// already knows the provider successfully observed the PID and reports
+/// "no matching Verde image". On macOS, where the provider returns `None`
+/// for *"cannot verify"*, callers must short-circuit before reaching
+/// this helper (see Sprint 27 commit 4's `is_stale_with_provider`).
+///
+/// - `None` → `true` (the PID holds some process that is not Verde)
+/// - `Some(name)` matching `expected` (case-insensitive) → `false`
+/// - `Some(name)` mismatch → `true` (PID reuse detected)
+#[allow(dead_code)]
+pub(crate) fn is_stale_by_image_match(observed: Option<&str>, expected: &str) -> bool {
+    match observed {
+        None => true,
+        Some(name) => !name.eq_ignore_ascii_case(expected),
+    }
+}
+
 pub struct LockManager;
 
 impl LockManager {
@@ -211,6 +244,35 @@ mod tests {
         assert!(!is_stale_by_ttl("not a date", Utc::now()));
         assert!(!is_stale_by_ttl("", Utc::now()));
         assert!(!is_stale_by_ttl("2026-04-19", Utc::now())); // missing time
+    }
+
+    #[test]
+    fn is_stale_by_image_match_none_is_stale() {
+        // None = "verified not-us" on Windows/Linux context. macOS callers
+        // must short-circuit before reaching this helper — see Sprint 26
+        // Key decisions and Sprint 27 commit 4's is_stale_with_provider.
+        assert!(is_stale_by_image_match(None, "verde.exe"));
+    }
+
+    #[test]
+    fn is_stale_by_image_match_exact_match_is_not_stale() {
+        assert!(!is_stale_by_image_match(Some("verde.exe"), "verde.exe"));
+        assert!(!is_stale_by_image_match(Some("verde"), "verde"));
+    }
+
+    #[test]
+    fn is_stale_by_image_match_is_case_insensitive() {
+        // Windows reports image names in whatever case the FS stores;
+        // basename comparison must ignore case so `VERDE.EXE` == `verde.exe`.
+        assert!(!is_stale_by_image_match(Some("VERDE.EXE"), "verde.exe"));
+        assert!(!is_stale_by_image_match(Some("Verde"), "verde"));
+    }
+
+    #[test]
+    fn is_stale_by_image_match_mismatch_is_stale() {
+        // PID reuse detection: the PID is alive but belongs to another process.
+        assert!(is_stale_by_image_match(Some("explorer.exe"), "verde.exe"));
+        assert!(is_stale_by_image_match(Some("notepad.exe"), "verde.exe"));
     }
 
     #[test]
