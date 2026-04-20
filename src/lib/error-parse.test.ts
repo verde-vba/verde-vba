@@ -148,6 +148,7 @@ describe("toI18nKey locale contract", () => {
     for (const { input, expectsTitleMessage } of samples) {
       const key = toI18nKey(parseBackendError(input));
       expect(key, `toI18nKey should be defined for input: ${input}`).toBeDefined();
+      if (key === undefined) continue;
       for (const [localeName, locale] of [
         ["en", en],
         ["ja", ja],
@@ -171,7 +172,7 @@ describe("toI18nKey locale contract", () => {
             `${localeName}:${key}.message should be non-empty`,
           ).not.toBe("");
         } else {
-          const value = resolve(locale, key!);
+          const value = resolve(locale, key);
           expect(
             typeof value,
             `${localeName}:${key} should be a flat string leaf`,
