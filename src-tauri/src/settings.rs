@@ -21,6 +21,13 @@ pub struct SyncSettings {
     pub auto_sync_to_excel: bool,
 }
 
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustSettings {
+    #[serde(default)]
+    pub vba_acknowledged: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     #[serde(default = "default_theme")]
@@ -31,6 +38,8 @@ pub struct Settings {
     pub editor: EditorSettings,
     #[serde(default)]
     pub sync: SyncSettings,
+    #[serde(default)]
+    pub trust: TrustSettings,
 }
 
 fn default_font_size() -> u32 {
@@ -82,6 +91,7 @@ impl Default for Settings {
             language: default_language(),
             editor: EditorSettings::default(),
             sync: SyncSettings::default(),
+            trust: TrustSettings::default(),
         }
     }
 }
