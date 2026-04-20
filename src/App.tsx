@@ -297,7 +297,7 @@ function App() {
         <Banner
           tone="warning"
           onDismiss={() => setSaveBlockedPrompt(null)}
-          dismissLabel="Dismiss"
+          dismissLabel={t("common.dismiss")}
         >
           {saveBlockedPrompt}
         </Banner>
@@ -307,9 +307,9 @@ function App() {
         <Banner
           tone="warning"
           onDismiss={() => setExcelOpenPrompt(null)}
-          dismissLabel="Dismiss"
+          dismissLabel={t("common.dismiss")}
         >
-          Cannot save while Excel has the workbook open.
+          {t("status.excelOpen")}
           {excelOpenPrompt ? ` (${excelOpenPrompt})` : ""}
         </Banner>
       )}
