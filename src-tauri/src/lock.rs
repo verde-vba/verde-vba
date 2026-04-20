@@ -124,3 +124,57 @@ impl LockManager {
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[test]
+    fn acquire_creates_lock_file() {
+        let tmp = env::temp_dir().join(format!("verde_lock_test_{}.xlsm", std::process::id()));
+        std::fs::write(&tmp, b"dummy").unwrap();
+        let result = LockManager::acquire(tmp.to_str().unwrap());
+        let lock_path = LockManager::lock_path(tmp.to_str().unwrap());
+        let cleanup = || {
+            let _ = std::fs::remove_file(&lock_path);
+            let _ = std::fs::remove_file(&tmp);
+        };
+        if result.is_err() {
+            cleanup();
+            panic!("acquire failed: {:?}", result);
+        }
+        assert!(lock_path.exists(), "lock file should exist");
+        cleanup();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn acquire_sets_hidden_system_attrs_on_windows() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::Win32::Storage::FileSystem::{
+            GetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
+            INVALID_FILE_ATTRIBUTES,
+        };
+        use windows::core::PCWSTR;
+
+        let tmp = env::temp_dir().join(format!("verde_attr_test_{}.xlsm", std::process::id()));
+        std::fs::write(&tmp, b"dummy").unwrap();
+        LockManager::acquire(tmp.to_str().unwrap()).unwrap();
+        let lock_path = LockManager::lock_path(tmp.to_str().unwrap());
+
+        let wide: Vec<u16> = lock_path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let attrs = unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) };
+        assert_ne!(attrs, INVALID_FILE_ATTRIBUTES.0);
+        assert_ne!(attrs & FILE_ATTRIBUTE_HIDDEN.0, 0, "hidden bit must be set");
+        assert_ne!(attrs & FILE_ATTRIBUTE_SYSTEM.0, 0, "system bit must be set");
+
+        // Must clear attrs to delete on Windows
+        let _ = LockManager::release(tmp.to_str().unwrap());
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
