@@ -24,30 +24,18 @@ interface LockPrompt {
 function App() {
   const { resolved } = useTheme("system");
   const { t } = useTranslation();
-  const projectState = useVerdeProject();
   const {
     project,
     activeModule,
     readOnly,
+    conflict,
     openProject,
     forceOpenProject,
     openProjectReadOnly,
     setActiveModule,
     saveModule,
-  } = projectState;
-  // Task 2 will extend useVerdeProject() with `conflict` and
-  // `resolveConflict`. Read them through a cast so this file compiles
-  // while their work is still landing; once their hook types are in we
-  // can drop the cast. TODO: remove the any-cast after useVerdeProject
-  // exports conflict/resolveConflict in its return type.
-  const maybeConflictState = projectState as unknown as {
-    conflict?: { modules?: unknown[]; conflictingModules?: unknown[] } | null;
-    resolveConflict?: (side: "verde" | "excel") => Promise<void>;
-  };
-  const conflict = maybeConflictState.conflict ?? null;
-  const resolveConflict = maybeConflictState.resolveConflict;
-  const conflictCount =
-    (conflict?.modules?.length ?? conflict?.conflictingModules?.length ?? 0);
+    resolveConflict,
+  } = useVerdeProject();
   const { acknowledged: trustAcknowledged, acknowledge: acknowledgeTrust } =
     useTrust();
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
@@ -127,13 +115,11 @@ function App() {
   }, [acknowledgeTrust]);
 
   const handleKeepFile = useCallback(() => {
-    // TODO: remove guard once useVerdeProject.resolveConflict is landed.
-    if (resolveConflict) void resolveConflict("verde");
+    void resolveConflict("verde");
   }, [resolveConflict]);
 
   const handleKeepExcel = useCallback(() => {
-    // TODO: remove guard once useVerdeProject.resolveConflict is landed.
-    if (resolveConflict) void resolveConflict("excel");
+    void resolveConflict("excel");
   }, [resolveConflict]);
 
   const handleSelectModule = useCallback(
@@ -341,7 +327,7 @@ function App() {
 
       {conflict != null && (
         <ConflictDialog
-          count={conflictCount}
+          count={conflict.modules.length}
           onKeepFile={handleKeepFile}
           onKeepExcel={handleKeepExcel}
         />
