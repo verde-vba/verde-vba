@@ -677,20 +677,21 @@ mod tests {
     }
 
     #[test]
-    fn is_excel_open_error_documents_known_japanese_locale_miss() {
-        // Known limitation pinned (Sprint 18 / PBI #4): on a Japanese
-        // Windows the COM/PS error reads "別のプロセスで使用されているため..."
-        // which none of the EXCEL_OPEN_SUBSTRINGS catch. This test SHOULD
-        // flip to `true` when follow-up #17 (HRESULT-based classification)
-        // lands — at which point the test must be updated to pin the new
-        // behavior, not deleted. Deleting it would erase the institutional
-        // memory of which message format the classifier learned to handle.
-        let ja = "ファイル 'sales.xlsm' は別のプロセスで使用されているため、アクセスできません。";
+    fn is_excel_open_error_detects_japanese_locale_via_hresult_tag() {
+        // Sprint 25 / PBI #17: the Sprint-18 pinned-negative is flipped.
+        // A Japanese-locale COM error arrives with localised prose that
+        // never matches EXCEL_OPEN_SUBSTRINGS, but the PS catch block now
+        // appends `VERDE_HRESULT=0x80070020` to stderr. The classifier must
+        // detect Excel-open via the HRESULT tag and ignore locale entirely.
+        //
+        // If this test regresses, the Japanese-locale EXCEL_OPEN dialog
+        // silently goes missing again — the exact outcome Sprint 18 pinned
+        // as a known miss.
+        let ja_with_tag = "ファイル 'sales.xlsm' は別のプロセスで使用されているため、アクセスできません。\nVERDE_HRESULT=0x80070020\n";
         assert!(
-            !ProjectManager::is_excel_open_error(ja),
-            "EXPECTED failure today: Japanese-locale error unmatched. \
-             When follow-up #17 lands, update this assertion and the \
-             docs on EXCEL_OPEN_SUBSTRINGS rather than removing the test."
+            ProjectManager::is_excel_open_error(ja_with_tag),
+            "Japanese-locale error must be classified via the VERDE_HRESULT \
+             tag emitted by the PS catch block (locale-agnostic path)."
         );
     }
 
