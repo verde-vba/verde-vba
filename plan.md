@@ -9,13 +9,14 @@ All earlier sprints collapse to one-line rows in the index table below —
 commit-level detail. Compression-only sprints (like Sprint 16 itself) do
 not consume a detail slot, and probe-only refinement sprints occupy one
 slot at whatever density their outcome requires (often < 50 lines).
-Currently detailed: Sprint 24 / 25 / 26. A planner adding a new sprint
+Currently detailed: Sprint 25 / 26 / 27. A planner adding a new sprint
 section must demote the now-oldest detailed sprint into the index row in
 the same commit. Sprint 17–19 were folded into index rows during Sprint
 24 housekeeping (closing a pre-existing detail-drift). Sprint 23 was
-demoted during Sprint 26 housekeeping.
+demoted during Sprint 26 housekeeping. Sprint 24 was demoted during
+Sprint 27 housekeeping.
 
-## Sprint 3–23 summary index
+## Sprint 3–24 summary index
 
 | Sprint | 主題                                                                            | 主要コミット                                                                    |
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -39,6 +40,7 @@ demoted during Sprint 26 housekeeping.
 | 21     | `vi.fn()` cast Tidy First (rule-of-three 到達, 3 hits across 2 files)            | `03a603a` replace `vi.fn() as (Fn)` with typed `vi.fn<(Fn)>()`. Frontend 63/63 tests unchanged; `rg 'vi\.fn\(\) as \(' src/` → 0. Key decision: generic form is vitest's idiomatic pattern (safer than unsafe downward cast). #15 design-weight deferred to Sprint 22 Planning (macOS TDD 不適合認定 → Sprint 22 で env-var 経路確定 → Sprint 23 で実装完了)。 |
 | 22     | `#15` PS 引数渡しアーキテクチャ設計 (Planning-only, docs commit)                 | `f3dbd32` 設計記録: Approach 1 (env-var 経由) を採択。Approach 2 (`-File` + 一時ファイル) は `tempfile` crate 追加 + クラッシュ残留リスクでコスト過大、Approach 3 (escape 強化) は injection 根絶せず却下。Rust `Command::env("VERDE_*", ...)` / PS `$env:VERDE_*` / `VERDE_` prefix policy を確定。実装は Sprint 23 で履行 (`9cc2c12`)。 |
 | 23     | `#15` 実装: PS 引数を env-var 経由へ移行 (Planning → 実装 pattern 成立)         | `4c00585` Tidy First (PS 本体 `const` 昇格 + `str::replace`); `cf84fd8` RED (injection-flavored → platform error); `9cc2c12` GREEN (env-var 経路配線 + `validate_ps_arg` + injection tests 削除, -9 → 48 Rust tests); docs `f3dbd32`. `.env_clear()` 不使用 (PS `PSModulePath` 等親プロセス依存を破壊しない) と denylist 完全削除 ("env-var が構造的排除なので validator 残置は anti-pattern 誘発") が durable 判断。Unicode/`$` 含みパスは副次的に回復。`vba_bridge.rs` source を grep すれば `$env:VERDE_*` マッピング 4 件は現物確認可能。 |
+| 24     | `#16` / `#17` design-weight 評価 Planning-only + Sprint 17–19 index demotion    | docs-only (no code commits). Sprint 25 着手対象を `#17` (HRESULT EXCEL_OPEN) に確定。採択根拠: user-visible value (日本語 Excel の EXCEL_OPEN ダイアログ完全不発) × Sprint 18 pinned-negative が自然な RED × pure helper で macOS full TDD × Sprint 23 成果 (PS static const) が基盤。`#16` 後回し理由: 3 OS 分岐 + dev-env fallback で design surface が #17 の約 2 倍、TTL 7d fallback で「待てば解ける」問題に圧縮済み。`sysinfo` crate 却下 ("1 箇所の needs に対して依存代償過大"、`windows`/`libc` 既存 FFI surface で足りる) が durable。再評価 trigger (i) production PID reuse 報告 (ii) `#17` 完了後の Sprint N として起票、の 2 本で保留を確定ステータスに格上げ。Sprint 17–19 の詳細 section を index row へ折り畳み、plan-bloat rule ("3 most recent detailed") への pre-existing drift を閉鎖。Commit discipline notes section (`$` HEREDOC escape rule) を本 Sprint で新設。 |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
 
@@ -65,7 +67,7 @@ source and the external gate blocking execution.
 | 13  | Alias of #12 (explicit registration during Sprint 18 security sweep)| S18         | Same as #12 — kept as a separate id only for planner cross-reference |
 | 14  | (reserved — placeholder retired by Sprint 18 bundling decision)    | S18         | n/a                                               |
 | 15  | Migrate `vba_bridge` to `-ArgumentList` / `param(...)`             | S18         | Re-architecture PBI (script body must not concatenate caller data) |
-| 16  | Image-name-based lock staleness (Windows + Linux + macOS cfg-gate) | S18         | **Planning 完了 (Sprint 26)** / 実装 Sprint 27 (`is_stale_by_image_match` pure helper + `process_image_basename` 3-OS provider を `lock.rs` に注入; +8 → 65 Rust tests 予測) |
+| 16  | ~~Image-name-based lock staleness (Windows + Linux + macOS cfg-gate)~~ — **CLOSED in Sprint 27** | S18 | `is_stale_by_image_match` pure helper + `process_image_basename` 3-OS cfg-gate provider + `is_stale_with_provider` を `lock.rs` に実装。`is_stale` は delegator 化で production / test 経路を統合。macOS は provider `None` → TTL fallback で Sprint 18 挙動を bit-perfect 維持 (pinned)。`+7 → 64` Rust tests on macOS host (Sprint 26 予測 +8 → 65 から -1; cfg-gated smoke tests の host-specific compile が overcount を生んだため)。 |
 | 17  | ~~HRESULT-based EXCEL_OPEN classification~~ — **CLOSED in Sprint 25** (`6578c40`) | S18 | locale-agnostic path live via `VERDE_HRESULT=0x...` stderr tag; JP-locale dialog now fires |
 
 ## Intentional Pause — 終了記録 (exited 2026-04-21 by Sprint 18)
@@ -96,342 +98,6 @@ PBI 投入）により解除され、Sprint 18 として security 4 件に着地
 - **Pause が有効だったのは期間が短かったから**ではなく、「silent probe
   を禁じる」ルールを明示していたから。次に Pause に入る場合もこの
   構造を維持すること（期間は成り行き、条件は厳格）。
-
-# Sprint 24 (2026-04-21) — #16 / #17 design-weight 評価 + Sprint 17–19 housekeeping
-
-## Goal
-
-Sprint 23 で #15 が完了し、Sprint 18 で登録された残る 2 件の design-weight
-follow-up (#16 lock staleness, #17 HRESULT EXCEL_OPEN) が blocked 状態から
-解除された。本 Sprint で両者を正面から比較評価し、**Sprint 25 で着手する
-1 件を確定**、もう 1 件の不採用理由を durable に記録する。併せて
-**Sprint 17–19 の index demotion** (plan-bloat rule "3 most recent detailed"
-への pre-existing drift 閉鎖) を同コミットに束ねる。docs-only、コード変更なし。
-
-## Probes executed (Sprint start)
-
-1. `rg '!\.' src/` → 0 hits
-2. `rg 'as\s+[A-Z]' src/ --type ts` → test 1 件 (ガード付き正当 assertion、保持)
-3. `rg '@ts-ignore|@ts-expect-error' src/` → 0 hits
-4. `rg '\bany\b' src/ --type ts` → `expect.any(Error)` のみ
-5. rule-of-three 新規候補: なし (Sprint 22 probe 結果から差分なし)
-
-## Priority selection
-
-- A (type-bypass): arc 維持 → skip
-- B (#16 / #17 design-weight Planning): **採用** — Sprint 22 型 Planning-only Sprint
-- C (rule-of-three): 未到達 → 監視継続
-
-## #16 (lock staleness) design-weight
-
-### 現行 lock 機構
-
-`src-tauri/src/lock.rs` — `LockInfo { user, machine, pid, app, locked_at }` を
-`~$<filename>.xlsm` に JSON 保存。`LockManager::is_stale` 決定表:
-
-| same_machine | PID alive | TTL (7d) | 結果 |
-|--------------|-----------|----------|------|
-| yes | no | — | stale |
-| yes | yes | expired | stale (Sprint 18 fallback) |
-| yes | yes | within | not stale |
-| no | — | expired | stale |
-| no | — | within | not stale |
-
-`is_pid_alive`: Windows `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, ...)`、
-非 Windows `libc::kill(pid, 0)`。
-
-### ギャップ
-
-PID reuse: Verde crash 後に Explorer / notepad 等に同一 PID が再割当されると
-`is_pid_alive` が `true` を返し、lock が TTL (7 日) 経過まで wedge する。
-
-### OS API 差異
-
-| OS | API | 備考 |
-|----|-----|------|
-| Windows | `QueryFullProcessImageNameW(HANDLE, 0, buf, &mut len)` | `OpenProcess` 経由の HANDLE を再利用可能。basename 比較で `verde.exe` 照合。 |
-| Linux | `/proc/<pid>/comm` (15文字 basename) / `readlink /proc/<pid>/exe` (フルパス) | 権限不足で読めないケースは fail-open / fail-close の設計判断が要る。 |
-| macOS | `proc_pidpath(pid, buf, size)` (libproc) or `sysinfo` crate | 開発環境のみ対象 (production ターゲットではない)。 |
-
-### macOS fallback 方針
-
-macOS は dev 環境に限定。選択肢:
-
-1. `#[cfg(any(windows, target_os = "linux"))]` で image-name 比較を有効化、
-   macOS は現行 `is_pid_alive + TTL` にフォールバック
-2. `proc_pidpath` を FFI で叩き、macOS にも実装
-3. `sysinfo` crate を依存として投入、3 OS 統一
-
-**推奨**: 選択肢 1。macOS は dev のみで wedge が起きても dev が即検知できる。
-production (Windows) + CI (Linux) で完全対応すれば要件充足。
-
-### TDD 可能性 (macOS)
-
-- `is_stale_by_image_match(info, observed_name, expected_basename) -> bool` を
-  **pure helper 化**すれば macOS で RED → GREEN 可能。
-- 実 OS API 呼び出しは `#[cfg(...)]` gate 下で Windows / Linux CI のみで実行。
-- Process name provider を trait / fn pointer 注入すると macOS でも
-  integration-flavored test が書ける (Sprint 22 env-var 経路と同じ構造)。
-
-### Approach 比較
-
-| 軸 | (a) OS native API | (b) `sysinfo` crate | (c) TTL 短縮のみ |
-|----|-------------------|---------------------|-----------------|
-| PID reuse 検出 | 構造的 | 構造的 | 緩和のみ (時間窓) |
-| 依存追加 | `windows` crate 既存 + `libc` | `sysinfo` 新規 (~500KB, 起動時間+) | なし |
-| macOS ビルド | cfg-gate + TTL fallback | sysinfo 対応 | 変更なし |
-| macOS TDD | pure helper で可 | crate mock 困難 | N/A (挙動不変) |
-| LOC 増分 | 中 (~80 + tests) | 小 (~30) | 極小 (const 変更) |
-| 依存制御 | 完全 | 外部 crate 追随 | 完全 |
-
-**候補選定**: (a) OS native。`sysinfo` は process-listing 1 箇所の needs に
-対して依存代償が過大 (本プロジェクトは Tauri + windows crate で必要な FFI surface を
-既に保有)。TTL 短縮 (c) は legitimate 長時間セッションを誤 reap するリスクを
-新設するため却下。
-
-## #17 (HRESULT EXCEL_OPEN) design-weight
-
-### 現行 classification
-
-`src-tauri/src/project.rs:145` — `EXCEL_OPEN_SUBSTRINGS` 英語 5 件 (lowercase
-`contains` match)。`src-tauri/src/project.rs:532` に **Sprint 18 で pin された
-日本語ロケール negative-assertion test** (`is_excel_open_error_documents_known_japanese_locale_miss`)
-が残存 — follow-up #17 着地時に assertion を positive へ反転する約束付き。
-
-### ギャップ
-
-日本語 Windows の COM 例外は `"ファイル '...' は別のプロセスで使用されている
-ため..."` で 5 substring のどれにもマッチしない。結果: EXCEL_OPEN marker が
-付与されず、UI は generic error banner を表示、「Excel を閉じて再試行」
-ダイアログが発火しない。
-
-### PS 側 HRESULT 読み取り経路 (仕様レベル)
-
-PS `try { ... } catch { ... }` 内で `$_.Exception.HResult` が .NET exception の
-signed int を返す。COM 例外では `$_.Exception.InnerException.HResult` 参照が
-必要なケースあり。`Write-Error` / stderr に `VERDE_HRESULT=0x80070020` などの
-tag 行を emit する仕様が Rust 側 parser との contract を結ぶ。
-
-EXCEL_OPEN に対応する HRESULT (locale 非依存):
-- `0x80070020` `ERROR_SHARING_VIOLATION` — ファイル共有違反 (Excel 保持)
-- `0x80070021` `ERROR_LOCK_VIOLATION` — ロック領域アクセス
-
-他 kind:
-- `0x80070005` `E_ACCESSDENIED` → PermissionDenied
-- `0x80030002` `STG_E_FILENOTFOUND` → NotFound
-- `0x800A03EC` `XlNamedRange` Excel 固有 — 未分類 bucket
-
-### Rust 側 error kind マッピング案
-
-```rust
-pub(crate) enum ErrorKind {
-    ExcelOpen,          // 0x80070020, 0x80070021
-    PermissionDenied,   // 0x80070005
-    NotFound,           // 0x80030002
-    Unknown(i32),       // 未分類
-}
-fn parse_hresult_tag(stderr: &str) -> Option<i32> { ... }
-fn classify_hresult(hresult: i32) -> ErrorKind { ... }
-```
-
-両関数とも **完全 pure** — COM 呼び出しと切り離せるため macOS で full TDD 可能。
-
-### Approach 比較
-
-| 軸 | (a) HRESULT enum | (b) stderr substring (現行) | (c) exit code only |
-|----|------------------|----------------------------|--------------------|
-| locale-agnostic | ✅ | ❌ | ✅ |
-| 拡張性 | enum に 1 行追加 | locale 毎に無限追記 | ❌ 細分不可 |
-| PS 改変 | try/catch + tag emit 1 箇所 | 不要 | exit code 切り分け (広範改変) |
-| Rust 改変 | parse + enum + tests | なし | 粒度粗い |
-| macOS TDD | 完全 pure で full TDD | 既存通り | 限定的 |
-| pinned-negative test の扱い | positive へ自然反転 | 維持 | 反転不可 |
-
-**候補選定**: (a) HRESULT enum。Sprint 18 の pinned-negative test が自然な RED
-として機能し、Sprint 22 の env-var 経路と同様に pure helper で macOS TDD が成立。
-
-## Sprint 25 着手対象の確定
-
-### 比較マトリクス
-
-| 軸 | #16 lock staleness | #17 HRESULT EXCEL_OPEN |
-|----|---------------------|------------------------|
-| impact | PID reuse wedge (low freq; TTL 7d で待てば解ける) | 日本語 Excel の EXCEL_OPEN ダイアログ完全不発 (high freq, production UX 破損) |
-| effort | 中〜大 (3 OS 分岐 + dev-env fallback + pure helper 分離) | 小〜中 (PS try/catch + pure parser + enum) |
-| risk | 低 (現行 `is_pid_alive + TTL` がセーフティネット) | 低 (現行 substring match を fallback として併置可) |
-| testability (macOS) | 中 (pure helper は可; API 呼び出しは不可) | **高** (`parse_hresult_tag` + `classify_hresult` 完全 pure) |
-| user-visible value | 中 (crash 後 7d 待ちが数分で済む — 頻度低) | **高** (日本語 Excel でダイアログが初めて発火 — 毎 import) |
-| 既存 RED test の有無 | なし (新規起票要) | **あり** (Sprint 18 `is_excel_open_error_documents_known_japanese_locale_miss`) |
-| Sprint 22 型 Planning との整合性 | 3 OS fallback 設計は heavy (Planning 1 + 実装 1+ Sprint) | PS/Rust 契約 + enum — Sprint 22 env-var 規模 (Planning 1 + 実装 1) |
-
-### 判断: Sprint 25 は **#17 (HRESULT EXCEL_OPEN)** を着手
-
-**採択理由 (durable)**:
-
-1. **user-visible value の質が本質的に異なる**: #16 の PID wedge は Sprint 18
-   の TTL 7d fallback で「待てば解ける」問題になった。#17 は日本語ロケールで
-   「何度 import しても一度も正しいダイアログが出ない」 — 待っても解けない。
-   頻度 (毎 import) × 対象 (日本語ユーザー全員) × 持続性 (永続) の 3 軸で #17 が
-   優先。
-2. **Sprint 18 の pinned-negative test が自然な RED として機能**: Kent Beck の
-   「壊れたテストから始める」セオリーに最小摩擦で乗れる。
-   `is_excel_open_error_documents_known_japanese_locale_miss` の assertion 反転が
-   Sprint 25 Day 1 の RED になる — Sprint 18 の planner が今日のために仕込んだ
-   signal を履行する。
-3. **macOS で full pure-helper TDD が成立**: `parse_hresult_tag(stderr)` と
-   `classify_hresult(hresult)` は Windows COM と無関係な pure 関数。
-   Windows 実機なしで RED → GREEN → REFACTOR が回る。
-4. **Sprint 23 の成果が基盤として効く**: PS script 本体は既に static `const`。
-   try/catch + HRESULT emit の改変は `EXPORT_SCRIPT` / `IMPORT_SCRIPT` の各
-   1 箇所で完結。env-var 契約 (`$env:VERDE_*`) とも衝突しない。
-5. **design-weight が Sprint 22 型に収まる**: #16 は 3 OS × image-name API ×
-   dev-env fallback で Planning + 実装 Sprint の合計規模が #17 の 1.5〜2 倍。
-   #17 は Sprint 22 と同規模で 1 Planning + 1 実装 Sprint に収まる見込み。
-
-### #16 後回し理由 (durable)
-
-- **effort が相対的に大きい**: Windows `QueryFullProcessImageNameW` + Linux
-  procfs + macOS dev-env fallback + pure helper 分離。Sprint 22 型 Planning +
-  実装 Sprint の合計規模が #17 の約 2 倍。
-- **user-visible value が TTL で既に圧縮済み**: `lock.rs:18`
-  `LOCK_STALE_AFTER_HOURS = 24 * 7` (Sprint 18) が PID reuse wedge の
-  永続化を防いでいる。crashed Verde の lock は 7 日で reapable になる。
-  「絶対に解けない」問題ではない。
-- **再評価 trigger (durable)**:
-  - (i) production で PID reuse wedge の明示的報告が stakeholder から入った場合
-  - (ii) #17 完了後に本 Sprint の (a) OS native API 路線をベースに Sprint
-    25+N の Planning として取り上げ
-- **`sysinfo` 却下の durable 記録**: 将来の planner が #16 着手時に「楽な
-  選択肢」として `sysinfo` を引っ張り込むのを防ぐため、本 Sprint で
-  「1 箇所の needs に対して依存代償過大」と明記。本プロジェクトは既に
-  `windows` crate / `libc` を持ち、OS native FFI surface がゼロコストで使える。
-
-## Sprint 25 Sprint Goal 草案 (実装タスク粒度)
-
-**Goal**: PS 側 try/catch で HRESULT tag (`VERDE_HRESULT=0x...`) を stderr に
-emit し、Rust 側 pure parser が tag を抽出、`ErrorKind` enum +
-`classify_hresult` で locale 非依存に EXCEL_OPEN を分類。Sprint 18 の
-pinned-negative test を positive へ反転し、日本語 locale でも EXCEL_OPEN
-marker が付与される contract を pin する。
-
-### Tidy First 分離 (Sprint 23 と同形 3-commit)
-
-| 段階 | コミット種別 | 内容 |
-|------|-------------|------|
-| 1 | Tidy (構造のみ) | `parse_hresult_tag(stderr: &str) -> Option<i32>` を pure helper として切り出す。既存 classifier は substring 経路のまま。+3 unit tests (hex / decimal / none)。挙動不変。 |
-| 2 | Tidy (構造のみ) | `classify_hresult(hresult: i32) -> ErrorKind` を追加。`EXCEL_OPEN_HRESULTS: &[i32] = &[0x80070020u32 as i32, 0x80070021u32 as i32]`。+4 unit tests。挙動は未接続 (pure tests only)。 |
-| 3 | RED | Sprint 18 `is_excel_open_error_documents_known_japanese_locale_miss` の assertion を positive へ反転。HRESULT 経路が未接続なので RED 確定 (1 failed)。 |
-| 4 | GREEN (挙動変更) | `EXPORT_SCRIPT` / `IMPORT_SCRIPT` に `try { ... } catch { $h = $_.Exception.HResult; [Console]::Error.WriteLine("VERDE_HRESULT=0x{0:X8}" -f $h) }` 追加。Rust `classify_import_error` が `parse_hresult_tag` → `classify_hresult` 経路を通り、`ExcelOpen` の場合は EXCEL_OPEN marker を付与。substring fallback は HRESULT 無しケース (非 Windows テスト環境) のため併置。 |
-| 5 | Tidy (後) | substring fallback の存廃判断。HRESULT 経路が非 Windows でも cover される証拠 (例: Linux CI で stub 経由の HRESULT injection テスト) が揃ったら substring 削除。未検証なら維持。 |
-| 6 | docs | Sprint 25 retrospective + preamble "Currently detailed" を `22 / 23 / 24` → `23 / 24 / 25` 更新 + Sprint 22 を index へ demote。 |
-
-### PS / stderr 契約 (draft)
-
-| tag | 形式 | 例 |
-|-----|------|-----|
-| `VERDE_HRESULT` | `VERDE_HRESULT=0x{:08X}` | `VERDE_HRESULT=0x80070020` |
-| `VERDE_HRESULT_MSG` (optional) | `VERDE_HRESULT_MSG=<trim>` | `VERDE_HRESULT_MSG=ファイル ...` |
-
-parser は行単位で `VERDE_HRESULT=` prefix のみ抽出。未知 stderr は透過。
-既存 substring matcher は tag 未検出時の fallback として働く。
-
-### Test 予算 (予測)
-
-- `parse_hresult_tag` pure tests: +3 (hex / decimal / none)
-- `classify_hresult` pure tests: +4 (ExcelOpen x2, PermissionDenied, Unknown)
-- pinned-negative flip: ±0 (既存 1 件の assertion 反転のみ)
-- PS integration: 変化なし (Windows 実機のみで検証)
-- 予測 delta: **+7 (48 → 55 Rust tests)**。Sprint 23 の `-9 → 48` からの再増加。
-
-### Sprint 25 受け入れ基準 (予測)
-
-- `cargo test --lib` 55 green (予測)
-- `cargo clippy --lib -- -D warnings` クリーン
-- `bun run test` 63/63 緑 (frontend 無変更)
-- 日本語 pinned-negative test が positive 反転して green
-- `rg 'VERDE_HRESULT=' src-tauri/` → PS 2 箇所 + Rust parser 1 箇所
-
-## Housekeeping — Sprint 17–19 index demotion
-
-本 Sprint で Sprint 17 / 18 / 19 の詳細 section を「Sprint 3–20 summary index」の
-1 行 row へ折り畳み、plan-bloat rule ("3 most recent detailed") への
-pre-existing drift を閉じた。保全された情報:
-
-- **follow-up #15 (PS injection) の歴史**: Sprint 23 section に全詳細 (完了)。
-- **follow-up #16 / #17**: 本 Sprint 24 で design-weight 評価を記録。
-- **#12 / #13 (ConflictDialog wiring)**: backlog table に存続 (gate: backend
-  error-kind)。
-- **Intentional Pause 終了記録**: 別 section として保持 (durable signal — 将来の
-  Pause 設計時に参照)。
-- **Sprint 18 Key decisions** (denylist vs allowlist の理由、TTL 7d 根拠、
-  pinned-negative 理由、validator 配置理由、Win32_System_Threading bundling 理由):
-  commit message (`7c00520`, `084ee38`, `c875c58`) に保全。Sprint 24 以降で
-  同根拠が再登場する場合は `git show` 参照。
-- **Sprint 19 hook extraction 4 件 (C1–C4)** の詳細設計: commit message
-  (`072b44b`, `352d74c`, `702e7fa`, `19d7d5a`) に保全。C5 defer → Sprint 20 で
-  解消した流れは index row に記録済み。
-
-## 受け入れ基準 (本 Sprint 24)
-
-- `bun run test` **63/63** 緑 (コード変更なし)
-- `bun run tsc --noEmit` クリーン
-- `cargo test --lib` 未実行 (docs-only、backend 無変更; Sprint 23 baseline 48
-  green を継続想定)
-- plan.md に Sprint 24 Planning section 追加 (#16 / #17 design-weight 比較 +
-  Sprint 25 着手判断 + 不採用理由の durable 記録)
-- Sprint 17 / 18 / 19 の詳細 section が index row (3 行) に折り畳まれている
-- preamble "Currently detailed" が `22 / 23 / 24` に更新
-- Index table 見出しが "Sprint 3–20 summary index" に更新
-
-## 変更コミット
-
-| Commit | 内容 |
-|--------|------|
-| (docs) | このセクション + Sprint 17–19 index demotion + preamble 更新 + Commit discipline notes 新設 |
-
-## Key decisions
-
-- **Sprint 25 着手対象を #17 に確定するのは「user-visible value × TDD 摩擦
-  最小 × Sprint 23 基盤活用」の積が決定打**: 影響頻度 (日本語 Excel ユーザーは
-  毎 import) × RED が既に書かれている状態 × pure helper で macOS TDD が成立 ×
-  PS 本体が static const なので emit 追加が 2 箇所で完結、の 4 点が揃う。
-  #16 は 4 点のうち RED 未存在 + 3 OS 分岐で design surface が広い。
-- **#16 を「後回し」ではなく「再評価 trigger 付きで保留」に格上げ**: Sprint 25
-  完了時 (trigger ii) と production 報告 (trigger i) を durable に記録する
-  ことで、曖昧な "TODO" ではなく「design-weight 評価済みだが優先度で後ろ」
-  という確定ステータスに格上げ。planner が後で迷わない。
-- **`sysinfo` crate を事前に却下**: 依存追加は「将来の planner が思いつく
-  最短経路」の一つ。本 Sprint で「1 箇所の needs に対して過大」と durable に
-  記録することで、Sprint 25+N の #16 着手時に planner が楽をして sysinfo を
-  引っ張り込むのを防ぐ。
-- **substring fallback の存廃は Sprint 25 終盤判断に**: #17 GREEN 時点で
-  substring を即削除すると Windows 実機なしテスト (CI / macOS dev) の
-  classification カバレッジが急減する。HRESULT 経路が確実に動く証拠が揃って
-  から削除判断する方針。Sprint 23 の `validate_ps_arg` 削除は「env-var 経路が
-  構造的排除」という強保証があったため即削除できた; substring はそれと同じ
-  保証レベルがまだない。
-- **docs-only Sprint を単独で切る価値**: Sprint 22 の先例通り、implementation
-  Sprint に Planning を同梱すると (a) design judgement を急ぐ (b) 実装中に
-  alternative が見えた時の sunk-cost bias が乗る。Sprint 24 で design を
-  coolly 確定 → Sprint 25 で implementation に集中する分離は Sprint 22 → 23
-  で実証済みの pattern。
-- **housekeeping を Planning Sprint に束ねる判断**: Sprint 17–19 demotion は
-  単体で Sprint を切るほどの重みがなく、かつ本 Sprint の docs commit に
-  自然に束ねられる。「index demotion を忘れる」リスクを 1 commit 分の増分で
-  閉じた。
-
-## Follow-ups
-
-- **Sprint 25**: 上記 Sprint Goal 草案に従い #17 を TDD で実装
-  (Tidy → Tidy → RED → GREEN → Tidy → docs の 5〜6 commit)。
-- **Sprint 25+N**: #17 完了後、#16 design-weight を再評価。本 Sprint の
-  (a) OS native API 路線 + macOS cfg-gate fallback をベースに Planning を書く。
-- **rule-of-three 監視**: 新規 duplicate 未観測。Sprint 25 で PS
-  error-handling を触るため、`try/catch` パターンが複数箇所に現れる可能性
-  あり。重複発生時は即 Tidy First に切り替え。
-- **preamble "Currently detailed" drift 再発防止**: Sprint 25 追加時に
-  `22 / 23 / 24` → `23 / 24 / 25` 更新 + Sprint 22 index demotion を同
-  コミットで行うこと (本 Sprint で示した手順の踏襲)。
 
 # Sprint 25 (2026-04-21) — #17 実装: HRESULT EXCEL_OPEN 分類
 
@@ -921,8 +587,11 @@ row へ折り畳み、plan-bloat rule ("3 most recent detailed") を維持。保
 
 ## Follow-ups
 
-- **Sprint 27**: 上記 Sprint Goal 草案に従い #16 を TDD で実装 (Tidy → Tidy →
-  RED → GREEN → Tidy → docs の 6 commit、`+8 → 65` Rust tests 予測)。
+- **Sprint 27 (完了)**: 上記 Sprint Goal 草案を 6 commit で履行 (`9288277` Tidy
+  1 / `9c55913` Tidy 2 / `3045fb0` RED / `8d6df43` GREEN / `629de6e` Tidy-after
+  / 本 docs commit)。実績は `+7 → 64` Rust tests on macOS host (予測 +8 → 65 から
+  -1; cfg-gated smoke tests の host-specific compile により予測が overcount)。
+  詳細は Sprint 27 retrospective section 参照。
 - **Windows / Linux 実機 verification (post-Sprint 27)**: stakeholder / CI 環境
   で (i) `process_image_basename` が実プロセス名を返すか、(ii) PID reuse
   シナリオを意図的に再現して image-name mismatch で stale 判定されるかを
@@ -937,6 +606,171 @@ row へ折り畳み、plan-bloat rule ("3 most recent detailed") を維持。保
 - **preamble "Currently detailed" drift 再発防止**: Sprint 27 docs commit で
   `24 / 25 / 26` → `25 / 26 / 27` 更新 + Sprint 24 index demotion を同コミット
   で行う。Sprint 26 で確立した 3-sprint sliding window 手順の踏襲。
+
+# Sprint 27 (2026-04-21) — #16 実装: lock staleness image-name matching
+
+## Goal
+
+Sprint 26 で durable 化された 6-commit 骨格に従い、`lock.rs` に
+`is_stale_by_image_match` pure helper + `process_image_basename` 3-OS
+cfg-gate provider + `is_stale_with_provider` 拡張版を追加。`is_stale` を
+provider 経由 delegator にリファクタし、Windows PID reuse wedge を構造的に
+排除、Linux も同等、macOS は provider `None` 判定で既存 `is_pid_alive + TTL`
+fallback を bit-perfect 維持 (behavioral 変化ゼロ)。
+
+## Probes executed (Sprint start)
+
+1. baseline: Rust `cargo test --lib` 57 passed / Frontend 63 passed
+2. 既存 lock.rs 構造確認: `is_stale_by_ttl` は Sprint 18/25 で既に抽出済み
+   (line 33-40) — Sprint 26 commit 2 の「抽出 Tidy」は不要、直接 pure helper
+   追加が commit 1 に昇格。
+3. `rg 'QueryFullProcessImageNameW' src-tauri/` → 0 hits (feature flag は
+   Sprint 18 で有効化済み、symbol 未使用を確認)
+
+## コミット実績 (Sprint 26 骨格通り)
+
+| # | Commit | 内容 | Rust test delta |
+|---|--------|------|-----------------|
+| 1 | `9288277` | Tidy: `is_stale_by_image_match` pure helper + `EXPECTED_BASENAME` OS cfg const + 4 pure tests。`#[allow(dead_code)]` で未配線。 | 57 → 61 (+4) |
+| 2 | `9c55913` | Tidy: `process_image_basename` 3-OS cfg-gate provider (Windows `QueryFullProcessImageNameW` / Linux `/proc/<pid>/comm` / macOS None)。macOS smoke test 追加。 | 61 → 62 (+1 on macOS host; Windows/Linux host は +1 別 smoke で同等) |
+| 3 | `3045fb0` | RED: `is_stale_with_provider` signature 追加 (provider 引数受け取るが未使用)、`is_stale_reaps_same_machine_alive_pid_with_foreign_image` test が FAIL。 | 62 → 63 (RED: 62 passed / 1 failed) |
+| 4 | `8d6df43` | GREEN: `is_stale_with_provider` 本体完成 (provider 呼び出し → `Some` なら image-match / `None` なら cfg-gated: Win/Linux=stale, macOS=TTL fallback)。`is_stale` を delegator 化。RED 反転。`#[allow(dead_code)]` 一括解除。 | 63 passed (RED → GREEN) |
+| 5 | `629de6e` | Tidy-after: `is_stale_macos_fallback_respects_ttl` pin (provider `None` + within TTL → not stale、TTL expired → stale)。rule-of-three probe skip 判断を commit message に記録。 | 63 → 64 (+1) |
+| 6 | (本 commit) | docs: 本 retrospective + preamble `25 / 26 / 27` 更新 + Sprint 24 index demotion + backlog #16 CLOSED + Sprint 26 Follow-up bullet 完了化 | 64 (無変更) |
+
+## 受け入れ基準の照合
+
+- `cargo test --lib` **64 passed** (予測 65 から -1; 後述 Problems 参照)
+- `cargo clippy --lib -- -D warnings` クリーン ✅
+- `bun run test` **63/63** 緑 (frontend 無変更) ✅
+- `bun run tsc --noEmit` クリーン ✅
+- RED pin (`is_stale_reaps_same_machine_alive_pid_with_foreign_image`) が GREEN ✅
+- macOS fallback pin (`is_stale_macos_fallback_respects_ttl`) が緑 ✅
+- `rg 'process_image_basename' src-tauri/` → `lock.rs` のみに 3-OS cfg-gate 実装 + smoke tests + production wiring が観察される ✅
+- preamble drift 閉鎖 + Sprint 24 index demotion ✅
+- backlog #16 を CLOSED に更新 ✅
+
+## Retrospective (KPT)
+
+### Keep
+
+- **Sprint 26 durable design に最後まで従った**: commit 分割・cfg gate の
+  `None` 2 意味・provider 型 `fn(u32) -> Option<String>` 採択・macOS
+  fallback 保持など、Sprint 26 Key decisions を実装中の誘惑 (例:
+  `PidVerification` enum 導入で型に invariant を持たせたくなる) から守った。
+  Sprint 22→23 / 24→25 / 26→27 で 3 回連続で "Planning Sprint →
+  Implementation Sprint" pattern が robust に機能。
+- **`is_stale` を delegator 化**: production 経路と test 経路が同じ
+  `is_stale_with_provider` body を通る構造にしたことで、cfg 分岐 / provider
+  `None` 分岐の drift を構造的にゼロ化。将来の refactor で「test は通るが
+  production で違う」事故を防ぐ。
+- **Tidy First 分離を commit 1-2 で厳格に守った**: 両 commit 共に
+  `#[allow(dead_code)]` を明示し production 未配線を self-documenting。
+  commit 4 の GREEN で全 allow を一括解除、commit message で依存関係を
+  明示。review 時に「いつ configure された」が diff で追える。
+
+### Problem
+
+- **test 数予測が +1 ズレた (予測 65, 実績 64)**: cfg-gated smoke tests は
+  test runner の active OS でのみコンパイルされるため、host-dependent で
+  active test count が変動する。Sprint 26 design table "cfg 毎に 1 smoke
+  test" の予測値 +2 は host-agnostic の合計であり、単一 host の実測値
+  (macOS host では +1) と対応しない。**再発防止**: 次回 cfg-gated test を
+  追加する Planning Sprint では `+N per host` 表記を使い、host 非依存の
+  合計と混同しないようにする。
+- **stakeholder 指示文書と Sprint 26 durable design 間の不整合**:
+  stakeholder 指示文書では「既存 stale 判定関数から TTL check を
+  `fn is_stale_by_ttl` に抽出」とあったが、実際には Sprint 18/25 で既に
+  line 33-40 で抽出済みだった。Sprint 26 design table (line 816) は抽出を
+  前提とせず image-match pure helper 追加を commit 1 としていたため、
+  design table を truth source にして回避。**再発防止**: stakeholder
+  指示と durable design table 間で矛盾を検出したら、durable design を
+  優先し不整合を retrospective に記録。
+- **Provider `None` cfg 分岐の可読性**: `is_stale_with_provider` の
+  `match provider(pid) { ... None => { #[cfg(...)] {...} #[cfg(...)] {...} } }`
+  構造は動作するが、cfg gymnastics が function body に露出している。
+  将来 BSD 等の OS 対応が surface したら、`None` を受けた時の挙動を
+  OS-specific pure helper `fn stale_from_unavailable_provider() -> bool` に
+  抽出する余地あり。現時点では rule-of-three 未到達 (1/3) で skip。
+
+### Try
+
+- **Windows/Linux 実機 verification (Sprint 28 以降 / follow-up)**:
+  stakeholder / CI 環境で (i) `process_image_basename` が実プロセス名を
+  返すか、(ii) PID reuse シナリオを意図的に再現して image-name mismatch
+  で stale 判定されるかを verify。Sprint 25 の JP-locale verification と
+  同じく post-implementation follow-up として保留。
+- **cfg-gated test count の per-host 表記 convention**: 次回 cfg-gated
+  smoke test を追加する Planning Sprint では `+N tests per host (total +M
+  across 3 hosts)` 形式で予測、実測との乖離を最小化。本 Sprint で
+  Sprint 26 予測 `+8 → 65` が macOS host 実測 `+7 → 64` にズレた教訓。
+- **rule-of-three cfg-gate pattern の解釈明確化**: Sprint 25 HRESULT cfg /
+  `is_pid_alive` cfg / `process_image_basename` cfg で surface 数が 3 に
+  到達したが、本 Sprint commit 5 message で共通化 skip を durable 記録
+  (各々 OS-specific に完全に異なる body を持ち、共通 helper 化は cfg
+  gymnastics 移動にしかならない)。**rule-of-three は「共通 surface が
+  3 箇所に見えたら抽出」であり「cfg 構文が 3 回現れたら抽出」ではない**
+  という durable 解釈を次 Planning に伝搬。
+
+## 変更コミット一覧
+
+| Commit | 内容 |
+|--------|------|
+| `9288277` | refactor(lock): add is_stale_by_image_match pure helper + EXPECTED_BASENAME (Tidy First) |
+| `9c55913` | refactor(lock): add process_image_basename 3-OS cfg-gate provider (Tidy First) |
+| `3045fb0` | test(lock): add is_stale_with_provider stub + foreign-image RED test |
+| `8d6df43` | fix(lock): wire image-name provider into is_stale, closing #16 |
+| `629de6e` | test(lock): pin macOS fallback invariant for provider=None (Tidy After) |
+| (本 docs) | docs(plan): record Sprint 27 — #16 closed; demote Sprint 24 |
+
+## Key decisions (durable)
+
+- **`None` cfg-gate semantics を commit 4 で cfg macro 2 枝に落とし込んだ**:
+  `#[cfg(any(windows, target_os = "linux"))] { true }` /
+  `#[cfg(target_os = "macos")] { ttl_expired }`。Sprint 26 key decision
+  「`Option<String>` + OS cfg で invariant を切り分け」の実装形。enum
+  昇格 (`PidVerification` 等) は型が invariant を表現して見栄えが良いが、
+  cfg gate を「型の 2 値」に圧縮すると macOS 側が `Verified(None)` を
+  誤って解釈するリスクが生まれる。cfg で静的に分けると "macOS ビルドには
+  Windows/Linux 枝が 1 行も混入しない" という構造的保証が得られる。
+- **`is_stale_with_provider` signature を RED commit (commit 3) で先に
+  凍結**: commit 3 の stub は provider を accept して discard する。API
+  contract が先に確定することで、commit 4 の body 変更が test contract を
+  破壊しない保証が TDD 的に得られる。Sprint 25 pinned-negative flip と
+  同じ「契約先行 / 実装後行」pattern。
+- **`EXPECTED_BASENAME` の macOS 値を残した**: production 経路では macOS は
+  provider `None` で image-match に到達しないため未使用だが、`"verde"`
+  定義を残すことで (i) 将来 macOS 向け native API を wire する際に
+  comparison 側の準備が不要 (ii) pure helper `is_stale_by_image_match` の
+  macOS 単体テストを `#[cfg]` 切り分けなしで書けた。`#[allow(dead_code)]`
+  で dead-code warning を抑制、doc comment で意図を明記。
+- **rule-of-three cfg-gate 共通化を skip**: Sprint 25 HRESULT classification
+  + `is_pid_alive` + `process_image_basename` の 3 箇所で cfg-gate 構文が
+  surface したが、各々が OS-specific に本質的に異なる API を呼んでいるため
+  共通 helper を抽出しても cfg gymnastics が別関数に移動するだけ。
+  rule-of-three は「共通 surface が 3 箇所に見えたら抽出」であり、
+  「cfg 構文が 3 回現れたら抽出」ではないという durable 解釈を本 Sprint で
+  明示化。
+
+## Follow-ups
+
+- **Windows 実機 verification (post-Sprint 27)**: `QueryFullProcessImageNameW`
+  が実際の Verde プロセス名を小文字で返すか、PID reuse シナリオを意図的に
+  再現して image-name mismatch で stale 判定されるかを stakeholder / CI
+  環境で verify。Sprint 25 JP-locale verification と並行 backlog。
+- **Linux container 環境での `/proc/<pid>/comm` 挙動調査**: container
+  runtime によって basename が container の entrypoint 名になるケースが
+  あり得る。Follow-up として rule-of-three-style に「実例 3 件」が surface
+  したら `/exe` readlink フォールバック追加を検討。
+- **long-path enable Windows 環境での buffer 過小**: `buf[260]` は
+  `MAX_PATH` 準拠だが、Windows 10+ long-path enable 環境で Verde が
+  `Program Files` 以外の長い path から起動される場合に truncation 可能性
+  あり。stakeholder 報告ベースで surface したら buffer 再試行 loop 追加を
+  検討。
+- **preamble "Currently detailed" drift 再発防止**: Sprint 28 追加時に
+  `25 / 26 / 27` → `26 / 27 / 28` 更新 + Sprint 25 index demotion を同
+  コミットで行うこと (本 Sprint で示した 3-sprint sliding window 手順の
+  踏襲)。
 
 # Commit discipline notes
 
