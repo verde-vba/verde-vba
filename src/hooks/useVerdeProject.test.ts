@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProjectInfo } from "../lib/types";
+import type { ModuleInfo, ProjectInfo } from "../lib/types";
 
 // Mirror useTrust.test.ts: intercept the Tauri IPC boundary so the real
 // command wrappers in `tauri-commands.ts` flow through our mock without
@@ -109,6 +109,37 @@ describe("useVerdeProject", () => {
         "project not found: deadbeef00000000"
       );
       expect(result.current.conflict).not.toBeNull();
+    });
+  });
+
+  describe("setActiveModule accepts null", () => {
+    it("clears activeModule so the tab bar can reflect a no-modules-open state", () => {
+      // Arrange: hook in its initial state has activeModule === null
+      // already, so flip it to a value first, then drive it back to
+      // null through the public API. Two acts prove the signature
+      // accepts null *and* the reducer honors the transition; either
+      // on its own would leave one of the guarantees unpinned.
+      const { result } = renderHook(() => useVerdeProject());
+      const mod: ModuleInfo = {
+        filename: "Module1.bas",
+        module_type: "Module",
+        content: "",
+        line_count: 0,
+      };
+
+      act(() => {
+        result.current.setActiveModule(mod);
+      });
+      expect(result.current.activeModule).toEqual(mod);
+
+      // Act: the call that — before the Sprint 7 signature widening —
+      // required a null! escape hatch at every caller. Passing null
+      // directly is now the contract.
+      act(() => {
+        result.current.setActiveModule(null);
+      });
+
+      expect(result.current.activeModule).toBeNull();
     });
   });
 
