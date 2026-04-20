@@ -160,6 +160,43 @@ impl ProjectManager {
             .any(|needle| lower.contains(needle))
     }
 
+    /// Parse a `VERDE_HRESULT=0x...` (or decimal) tag line emitted by the
+    /// PS script's catch block. Returns the first HRESULT value found.
+    ///
+    /// Sprint 25 / PBI #17. Extracted as a *pure* helper first (Tidy First)
+    /// so classification can be driven off COM error codes rather than
+    /// locale-specific substrings. The PS side emits the tag to stderr via
+    /// `[Console]::Error.WriteLine("VERDE_HRESULT=0x{0:X8}" -f $h)`; the
+    /// Rust caller then forwards the captured stderr to this function.
+    ///
+    /// Accepts both the canonical hex form (`0x80070020`) and a decimal
+    /// form (`-2147024864`) so the contract stays robust against future PS
+    /// formatter drift. Only the first matching line wins — PS wrappers
+    /// occasionally duplicate the line, and those duplicates carry no new
+    /// information.
+    ///
+    /// `#[allow(dead_code)]` is temporary: the Sprint 25 GREEN commit wires
+    /// this helper into `classify_import_error`, at which point the allow
+    /// must come off.
+    #[allow(dead_code)]
+    pub(crate) fn parse_hresult_tag(stderr: &str) -> Option<i32> {
+        for line in stderr.lines() {
+            let trimmed = line.trim();
+            let Some(rest) = trimmed.strip_prefix("VERDE_HRESULT=") else {
+                continue;
+            };
+            let rest = rest.trim();
+            if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+                if let Ok(n) = u32::from_str_radix(hex, 16) {
+                    return Some(n as i32);
+                }
+            } else if let Ok(n) = rest.parse::<i32>() {
+                return Some(n);
+            }
+        }
+        None
+    }
+
     /// Classify an import failure. Any error whose stderr/message matches a
     /// known EXCEL_OPEN substring is re-wrapped with the EXCEL_OPEN marker
     /// so the UI can branch on it. Non-matching errors pass through
@@ -526,6 +563,33 @@ mod tests {
             "Module1.bas: syntax error at line 3"
         ));
         assert!(!ProjectManager::is_excel_open_error(""));
+    }
+
+    // --- Sprint 25 / PBI #17: parse_hresult_tag (pure) ---
+
+    #[test]
+    fn parse_hresult_tag_reads_uppercase_hex_form() {
+        // Canonical shape emitted by PS `"0x{0:X8}" -f $h`.
+        let stderr = "Exception: boom\nVERDE_HRESULT=0x80070020\n";
+        let got = ProjectManager::parse_hresult_tag(stderr);
+        assert_eq!(got, Some(0x80070020u32 as i32));
+    }
+
+    #[test]
+    fn parse_hresult_tag_reads_decimal_form_for_formatter_drift_resilience() {
+        // If PS ever emits the raw i32 instead of the X8 form, we still
+        // want the contract to hold — HResult is a signed 32-bit int.
+        let stderr = "VERDE_HRESULT=-2147024864\n";
+        let got = ProjectManager::parse_hresult_tag(stderr);
+        assert_eq!(got, Some(-2147024864));
+    }
+
+    #[test]
+    fn parse_hresult_tag_returns_none_when_tag_absent() {
+        // Arbitrary stderr without the tag must not be matched by accident.
+        let stderr = "Some unrelated PowerShell error text\n0x80070020 appears here\n";
+        assert_eq!(ProjectManager::parse_hresult_tag(stderr), None);
+        assert_eq!(ProjectManager::parse_hresult_tag(""), None);
     }
 
     #[test]
