@@ -191,28 +191,34 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// Load `.verde-meta.json` for `sync_to_excel`, wrapping the two
+    /// user-facing failure modes with stable substrings the frontend / MCP
+    /// can pattern-match on:
+    /// - missing meta -> `"project not found: {id}"`
+    /// - malformed JSON -> `"project metadata is corrupted: {cause}"`
+    ///
+    /// Other I/O errors (permissions, disappearing file between `exists()`
+    /// and read) pass through unchanged.
+    fn load_meta_for_sync(project_id: &str) -> Result<ProjectMeta, Box<dyn std::error::Error>> {
+        let path = Self::meta_path(project_id);
+        if !path.exists() {
+            return Err(format!("project not found: {project_id}").into());
+        }
+        let content = std::fs::read_to_string(&path)?;
+        let meta: ProjectMeta = serde_json::from_str(&content)
+            .map_err(|e| format!("project metadata is corrupted: {e}"))?;
+        Ok(meta)
+    }
+
     /// Bulk-push every module under the project directory into the bound xlsm
     /// via `VbaBridge::import`. Happy path only: assumes meta exists and every
     /// import succeeds. Edge cases (empty module set, missing meta, per-module
     /// recovery) are intentionally deferred to the TDD loop in Phase 3.
     pub async fn sync_to_excel(&self, project_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let project_dir = Self::project_dir(project_id);
-        // Surface a stable "project not found" substring when the meta file
-        // is absent so the frontend / MCP can pattern-match on it (mirrors
-        // the EXCEL_OPEN_MARKER convention). Other I/O errors from read_meta
-        // — permissions, corrupt JSON, etc. — still bubble up unchanged.
-        if !Self::meta_path(project_id).exists() {
-            return Err(format!("project not found: {project_id}").into());
-        }
         // Pull xlsm_path out of meta and drop the meta before crossing any
         // .await — `Box<dyn Error>` is !Send and would poison the future.
-        // Split read + parse so we only wrap the parse failure with the
-        // "project metadata is corrupted" marker. I/O errors (permissions,
-        // disappearing file between exists() and read) still bubble up raw.
-        let meta_content = std::fs::read_to_string(Self::meta_path(project_id))?;
-        let meta: ProjectMeta = serde_json::from_str(&meta_content)
-            .map_err(|e| format!("project metadata is corrupted: {e}"))?;
-        let xlsm_path = meta.xlsm_path;
+        let xlsm_path = Self::load_meta_for_sync(project_id)?.xlsm_path;
         let source_dir = project_dir.to_string_lossy().to_string();
 
         for entry in std::fs::read_dir(&project_dir)? {
