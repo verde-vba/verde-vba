@@ -27,6 +27,62 @@ describe("useVerdeProject", () => {
     invokeMock.mockReset();
   });
 
+  describe("resolveConflict error handling", () => {
+    it("records the raw backend message, rethrows, and preserves the pending conflict so the user can retry", async () => {
+      // Arrange: open succeeds, the conflict check returns a non-empty
+      // module list so `state.conflict` is populated. Then the next
+      // `resolve_conflict` invocation rejects with the raw backend
+      // substring parseBackendError keys on for `projectNotFound`.
+      const project = makeProject();
+      const conflictModules = [
+        {
+          filename: "Module1.bas",
+          fileHash: "aaa",
+          metaHash: "bbb",
+          excelHash: "ccc",
+        },
+      ];
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "open_project") return Promise.resolve(project);
+        if (cmd === "check_conflict") return Promise.resolve(conflictModules);
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      });
+
+      const { result } = renderHook(() => useVerdeProject());
+
+      await act(async () => {
+        await result.current.openProject(project.xlsm_path);
+      });
+      await waitFor(() => expect(result.current.conflict).not.toBeNull());
+
+      // Swap in the rejecting impl for resolve_conflict only after the
+      // open flow has settled, so the conflict-check call above isn't
+      // accidentally affected by the new mock shape.
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "resolve_conflict") {
+          return Promise.reject(
+            new Error("project not found: deadbeef00000000")
+          );
+        }
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      });
+
+      // Act / Assert: the rejection must surface to the caller (so a UI
+      // consumer can observe the failure) AND state.error must hold the
+      // raw backend message AND state.conflict must remain populated so
+      // the user can retry without reopening the project.
+      await act(async () => {
+        await expect(result.current.resolveConflict("verde")).rejects.toThrow(
+          "project not found: deadbeef00000000"
+        );
+      });
+      expect(result.current.error).toBe(
+        "project not found: deadbeef00000000"
+      );
+      expect(result.current.conflict).not.toBeNull();
+    });
+  });
+
   describe("syncToExcel error handling", () => {
     it("routes backend errors through the message idiom so the raw substring is preserved (not prefixed with 'Error: ')", async () => {
       // Arrange: open succeeds, conflict check returns empty, sync rejects
