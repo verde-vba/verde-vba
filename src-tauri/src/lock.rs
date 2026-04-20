@@ -107,7 +107,7 @@ impl LockManager {
     }
 
     #[cfg(windows)]
-    fn is_pid_alive(pid: u32) -> bool {
+    pub(crate) fn is_pid_alive(pid: u32) -> bool {
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
         unsafe {
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
@@ -120,8 +120,14 @@ impl LockManager {
     }
 
     #[cfg(not(windows))]
-    fn is_pid_alive(pid: u32) -> bool {
+    pub(crate) fn is_pid_alive(pid: u32) -> bool {
         unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    /// Hostname of the current machine, used by the command layer to compare
+    /// against a lock's recorded `machine` field for stale-lock detection.
+    pub(crate) fn current_machine_name() -> String {
+        Self::machine_name()
     }
 }
 
