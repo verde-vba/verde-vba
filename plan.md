@@ -704,3 +704,98 @@ precedes it is a test-framework check, not a type narrowing.
   Sprint 4 rejected it pending rule-of-three evidence.
 - **Structured logging for `checkConflict`** — still outstanding;
   Sprint 6 gated on telemetry.
+
+# Sprint 11 — Residual `path as string` cast Tidy in handleOpenFile
+
+## Goal
+
+Extend the Sprint 7 / 10 "type-system bypass removal" pattern to
+the last remaining instance under `src/`: the
+`const xlsmPath = path as string;` assertion at
+`App.tsx:113` inside `handleOpenFile`. Tauri v2 plugin-dialog's
+`open<T>()` already returns `string | null` for our option shape,
+and the `if (!path) return;` guard immediately above narrows it —
+so the assertion is redundant dead weight rather than a guard.
+
+## Scope
+
+- **Sole item**: drop the `as string` cast from `handleOpenFile`,
+  inlining `path` directly into the `openProject(path)` and
+  `handleCaughtBackendError(e, path)` call sites. Removes the
+  intermediate `xlsmPath` local since it existed only to carry the
+  cast.
+- No new test: existing `App.test.tsx` suite already exercises the
+  full `handleOpenFile` path (dialog open → openProject dispatch →
+  catch-site routing), so the cast removal is covered by the
+  current characterization suite. Adding a typing-only test would
+  be redundant with `tsc --noEmit`.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type         | Summary                                                   |
+| ------- | ------------ | --------------------------------------------------------- |
+| d024997 | refactor(ui) | Drop redundant `path as string` cast in `handleOpenFile`  |
+| (this)  | docs         | Record Sprint 11 plan and outcomes                        |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **32** tests across 5 files)
+- `bun run tsc --noEmit` — clean (exit 0)
+- `cargo` — untouched (no Rust changes in Sprint 11)
+
+## Key decisions
+
+- **Conditional-type inference proves the cast redundant**:
+  `plugin-dialog`'s `OpenDialogReturn<T>` is
+  `T['directory'] extends true ? ... : T['multiple'] extends true ? string[] | null : string | null`.
+  Our options object (`{ filters: [...] }`) leaves both `directory`
+  and `multiple` unset — neither extends `true` — so the inferred
+  return is `string | null`. The `if (!path) return;` guard narrows
+  the `null` branch away, leaving `string` without any assertion.
+  Probing the `.d.ts` before editing was load-bearing: it confirmed
+  the cast was not papering over a genuine union-widening hazard.
+- **Production change, not test-only**: the sprint brief preferred
+  test-only changes, but the only remaining type-system bypass
+  worth picking lived in production code (`App.tsx:113`). Declining
+  it in favor of a manufactured test-side Tidy would have burned a
+  sprint on the lower-value target. The production risk is minimal:
+  the cast is load-bearing only to TypeScript, not to the runtime
+  (it's a no-op after compile), and the existing test suite fully
+  covers the call paths that use the variable.
+- **`xlsmPath` local eliminated rather than preserved**: with the
+  cast gone, the intermediate `const xlsmPath = path;` would be
+  pure rename noise. Inlining `path` into the two consuming calls
+  is tighter and matches how `handleForceOpen`/`handleOpenReadOnly`
+  destructure `const { xlsmPath } = lockPrompt;` directly without
+  an intermediary — the naming asymmetry is gone as a side effect.
+- **No new characterization test added**: TypeScript's conditional-
+  type inference is compile-time, so the regression surface is
+  `tsc --noEmit`, not `vitest`. The existing App-level flow tests
+  (Sprint 9's saveBlocked path and Sprint 3's `projectNotFound`
+  banner render) already dispatch through `handleOpenFile`, so a
+  typo or regression in the `openProject(path)` wiring would fail
+  those. Adding a typing-check test would duplicate `tsc`'s job.
+- **Closes the "type-system bypass" theme for src/**: Sprints 7 /
+  10 / 11 form a coherent arc — production `null!` → test `key!` →
+  production `as string`. A post-sprint `grep` confirms no further
+  non-null assertions or redundant type casts remain in `src/**`
+  production or test code. The pattern is retired for this
+  codebase until new ones accrete.
+
+## Follow-ups (out of Sprint 11 scope)
+
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding; blocked on Verde-owned docs page decision.
+- **Sprint 5 sweep — Low priority items** (`StatusBar.tsx` `"ID: "`
+  prefix, `"VBA"` language tag, `WelcomeScreen.tsx` `"Verde"` brand
+  headline) — still outstanding; each needs a product decision.
+- **Optional: `withLoadingState` helper** — still outstanding;
+  Sprint 4 rejected it pending rule-of-three evidence.
+- **Structured logging for `checkConflict`** — still outstanding;
+  Sprint 6 gated on telemetry.
+- **All four remaining follow-ups are external-input-gated**:
+  product decisions (TrustGuideDialog URL, low-priority i18n
+  sweep), telemetry evidence (`checkConflict` noise), or
+  rule-of-three accumulation (`withLoadingState`). Sprint 12 will
+  likely need fresh input from the sweep or a new PBI rather than
+  another follow-up pickup.
