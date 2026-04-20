@@ -41,12 +41,12 @@ pub(crate) fn is_stale_by_ttl(locked_at: &str, now: DateTime<Utc>) -> bool {
 
 /// OS-specific basename expected for a same-machine lock holder.
 /// Compared case-insensitively against the PID's image name.
-/// Wired into `is_stale` via `is_stale_with_provider` in Sprint 27 commit 4.
+/// macOS value is unused in production (fallback path) but kept for
+/// symmetry and to let the macOS branch unit-test expected-basename
+/// comparisons without cfg gymnastics.
 #[cfg(windows)]
-#[allow(dead_code)]
 pub(crate) const EXPECTED_BASENAME: &str = "verde.exe";
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 pub(crate) const EXPECTED_BASENAME: &str = "verde";
 #[cfg(target_os = "macos")]
 #[allow(dead_code)]
@@ -64,7 +64,6 @@ pub(crate) const EXPECTED_BASENAME: &str = "verde";
 /// - `None` → `true` (the PID holds some process that is not Verde)
 /// - `Some(name)` matching `expected` (case-insensitive) → `false`
 /// - `Some(name)` mismatch → `true` (PID reuse detected)
-#[allow(dead_code)]
 pub(crate) fn is_stale_by_image_match(observed: Option<&str>, expected: &str) -> bool {
     match observed {
         None => true,
@@ -181,7 +180,6 @@ impl LockManager {
     /// commit 4 and pinned by `is_stale_macos_fallback_respects_ttl` in
     /// commit 5.
     #[cfg(windows)]
-    #[allow(dead_code)]
     pub(crate) fn process_image_basename(pid: u32) -> Option<String> {
         use windows::Win32::System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
@@ -202,7 +200,6 @@ impl LockManager {
     }
 
     #[cfg(target_os = "linux")]
-    #[allow(dead_code)]
     pub(crate) fn process_image_basename(pid: u32) -> Option<String> {
         let raw = std::fs::read_to_string(format!("/proc/{}/comm", pid)).ok()?;
         let trimmed = raw.trim_end_matches(['\n', '\r']).trim();
@@ -217,7 +214,6 @@ impl LockManager {
     /// rejection of `libproc` FFI and `ps` shell-out). Always returns `None`
     /// meaning **"cannot verify"**; callers fall back to TTL.
     #[cfg(target_os = "macos")]
-    #[allow(dead_code)]
     pub(crate) fn process_image_basename(_pid: u32) -> Option<String> {
         None
     }
@@ -241,44 +237,65 @@ impl LockManager {
     }
 
     /// Returns `true` iff the lock should be treated as stale (safe to
-    /// overwrite / ignore). Combines machine-local PID liveness with a
-    /// TTL fallback to survive Windows PID reuse after a Verde crash.
-    ///
-    /// - **Same machine, PID dead** → stale (original behavior).
-    /// - **Same machine, PID alive, TTL expired** → stale. PID reuse is
-    ///   more plausible than a legitimate multi-day Verde session; this
-    ///   prevents the lock from wedging permanently.
-    /// - **Same machine, PID alive, within TTL** → not stale.
-    /// - **Different machine, within TTL** → not stale (PID check impossible).
-    /// - **Different machine, TTL expired** → stale. An abandoned lock on
-    ///   a foreign host is the common "user forgot to close" scenario.
+    /// overwrite / ignore). Thin delegator to `is_stale_with_provider`
+    /// using the production image-name provider. All decision logic lives
+    /// in the testable variant; see its doc comment for the truth table.
     pub(crate) fn is_stale(info: &LockInfo) -> bool {
-        let same_machine = info.machine == Self::machine_name();
-        let ttl_expired = is_stale_by_ttl(&info.locked_at, Utc::now());
-        if same_machine {
-            !Self::is_pid_alive(info.pid) || ttl_expired
-        } else {
-            ttl_expired
-        }
+        Self::is_stale_with_provider(info, Self::process_image_basename, Utc::now())
     }
 
     /// Testable variant of `is_stale` that accepts an injectable image-name
-    /// provider and a `now` timestamp. Sprint 27 commit 3 RED stub: the
-    /// provider argument is **accepted but not consumed** so that the
-    /// image-match-aware RED test fails until commit 4 wires the provider
-    /// into the same-machine branch.
-    #[allow(dead_code)]
+    /// provider and a `now` timestamp. All same-machine staleness logic
+    /// lives here so that macOS unit tests can exercise every OS's branch
+    /// via stub providers (see Sprint 26 TDD analysis).
+    ///
+    /// Decision table (same machine):
+    ///
+    /// - PID dead (`is_pid_alive == false`) → stale (original behavior).
+    /// - PID alive, `provider` returns `Some(name)` matching
+    ///   `EXPECTED_BASENAME` case-insensitively → not stale, **unless**
+    ///   TTL expired (legacy wedge protection; PID reuse can still happen
+    ///   if a Verde-named process grabs the PID, but this is vanishingly
+    ///   rare and TTL is a cheap safety net).
+    /// - PID alive, `provider` returns `Some(name)` mismatched →
+    ///   **stale** (PID reuse detected; Sprint 27 structural fix for #16).
+    /// - PID alive, `provider` returns `None`:
+    ///   - On **Windows/Linux** (`None` = verified not-us): stale.
+    ///   - On **macOS** (`None` = cannot verify): fall back to TTL.
+    ///     This matches Sprint 18 behavior exactly and is pinned by
+    ///     `is_stale_macos_fallback_respects_ttl`.
+    ///
+    /// Different-machine: cannot cross-verify; TTL is the only signal.
     pub(crate) fn is_stale_with_provider(
         info: &LockInfo,
-        _provider: fn(u32) -> Option<String>,
+        provider: fn(u32) -> Option<String>,
         now: DateTime<Utc>,
     ) -> bool {
         let same_machine = info.machine == Self::machine_name();
         let ttl_expired = is_stale_by_ttl(&info.locked_at, now);
-        if same_machine {
-            !Self::is_pid_alive(info.pid) || ttl_expired
-        } else {
-            ttl_expired
+        if !same_machine {
+            return ttl_expired;
+        }
+        if !Self::is_pid_alive(info.pid) {
+            return true;
+        }
+        match provider(info.pid) {
+            Some(name) => {
+                is_stale_by_image_match(Some(&name), EXPECTED_BASENAME) || ttl_expired
+            }
+            None => {
+                // `None` semantics are cfg-gated (Sprint 26 Key decision):
+                // Windows/Linux = verified not-us → stale; macOS = cannot
+                // verify → TTL fallback preserves Sprint 18 behavior.
+                #[cfg(any(windows, target_os = "linux"))]
+                {
+                    true
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    ttl_expired
+                }
+            }
         }
     }
 }
