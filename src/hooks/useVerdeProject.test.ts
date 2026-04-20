@@ -22,6 +22,35 @@ function makeProject(overrides?: Partial<ProjectInfo>): ProjectInfo {
   };
 }
 
+// Every syncToExcel test needs the same prelude: open_project resolves to
+// a fresh ProjectInfo, check_conflict returns an empty list (so no
+// conflict dialog steals focus), and only the sync_to_excel branch
+// varies per test. Extracting the setup keeps the mock scaffolding from
+// drowning the assertion that actually characterizes the behavior.
+async function setupOpenedProject(
+  syncHandler: () => Promise<unknown>
+): Promise<{
+  result: ReturnType<typeof renderHook<ReturnType<typeof useVerdeProject>, unknown>>["result"];
+  project: ProjectInfo;
+}> {
+  const project = makeProject();
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === "open_project") return Promise.resolve(project);
+    if (cmd === "check_conflict") return Promise.resolve([]);
+    if (cmd === "sync_to_excel") return syncHandler();
+    return Promise.reject(new Error(`unexpected command: ${cmd}`));
+  });
+
+  const { result } = renderHook(() => useVerdeProject());
+
+  await act(async () => {
+    await result.current.openProject(project.xlsm_path);
+  });
+  await waitFor(() => expect(result.current.project).not.toBeNull());
+
+  return { result, project };
+}
+
 describe("useVerdeProject", () => {
   beforeEach(() => {
     invokeMock.mockReset();
@@ -88,22 +117,9 @@ describe("useVerdeProject", () => {
       // Arrange: open succeeds, conflict check returns empty, sync rejects
       // with an Error whose message is the raw backend substring we want
       // parseBackendError to be able to prefix-match.
-      const project = makeProject();
-      invokeMock.mockImplementation((cmd: string) => {
-        if (cmd === "open_project") return Promise.resolve(project);
-        if (cmd === "check_conflict") return Promise.resolve([]);
-        if (cmd === "sync_to_excel") {
-          return Promise.reject(new Error("project not found: abc123"));
-        }
-        return Promise.reject(new Error(`unexpected command: ${cmd}`));
-      });
-
-      const { result } = renderHook(() => useVerdeProject());
-
-      await act(async () => {
-        await result.current.openProject(project.xlsm_path);
-      });
-      await waitFor(() => expect(result.current.project).not.toBeNull());
+      const { result } = await setupOpenedProject(() =>
+        Promise.reject(new Error("project not found: abc123"))
+      );
 
       // Act: syncToExcel now rethrows after recording state.error so callers
       // observe the failure via promise rejection too. Awaiting on `rejects`
@@ -125,28 +141,14 @@ describe("useVerdeProject", () => {
       // loading flag the hook flips to `true` at entry is cleared before
       // control returns to the caller. The finally clause is the only
       // place that can clear it on the error path — the catch rethrows.
-      const project = makeProject();
-      invokeMock.mockImplementation((cmd: string) => {
-        if (cmd === "open_project") return Promise.resolve(project);
-        if (cmd === "check_conflict") return Promise.resolve([]);
-        if (cmd === "sync_to_excel") {
-          return Promise.reject(
-            new Error("project not found: deadbeef00000000")
-          );
-        }
-        return Promise.reject(new Error(`unexpected command: ${cmd}`));
-      });
+      const { result } = await setupOpenedProject(() =>
+        Promise.reject(new Error("project not found: deadbeef00000000"))
+      );
 
-      const { result } = renderHook(() => useVerdeProject());
-
-      // Sanity check: loading starts false so the post-rejection assertion
-      // can't be trivially satisfied by an initial-state coincidence.
+      // Sanity check: loading is false after the open flow settles so the
+      // post-rejection assertion can't be trivially satisfied by an
+      // initial-state coincidence.
       expect(result.current.loading).toBe(false);
-
-      await act(async () => {
-        await result.current.openProject(project.xlsm_path);
-      });
-      await waitFor(() => expect(result.current.project).not.toBeNull());
 
       // Act: observe the rejection. After the rethrow surfaces, loading
       // MUST have been cleared — proving the finally block ran.
@@ -165,28 +167,16 @@ describe("useVerdeProject", () => {
       // we can observe the intermediate `loading: true` state. Without a
       // manual resolver the invoke would settle immediately and the
       // pending-state window would close before we could read it.
-      const project = makeProject();
       let resolveInvoke: ((value: unknown) => void) | undefined;
       const pending = new Promise((r) => {
         resolveInvoke = r;
       });
-      invokeMock.mockImplementation((cmd: string) => {
-        if (cmd === "open_project") return Promise.resolve(project);
-        if (cmd === "check_conflict") return Promise.resolve([]);
-        if (cmd === "sync_to_excel") return pending;
-        return Promise.reject(new Error(`unexpected command: ${cmd}`));
-      });
+      const { result } = await setupOpenedProject(() => pending);
 
-      const { result } = renderHook(() => useVerdeProject());
-
-      // Sanity: loading starts false so the mid-flight assertion below
-      // can't be trivially satisfied by an initial-state coincidence.
+      // Sanity: loading is false after the open flow settles so the
+      // mid-flight assertion below can't be trivially satisfied by an
+      // initial-state coincidence.
       expect(result.current.loading).toBe(false);
-
-      await act(async () => {
-        await result.current.openProject(project.xlsm_path);
-      });
-      await waitFor(() => expect(result.current.project).not.toBeNull());
 
       // Kick off the call without awaiting so the invoke stays pending.
       // Wrapping in `act` flushes the setState(loading: true) that runs
