@@ -32,9 +32,7 @@ export function StatusBar({ status, projectId, line, column }: StatusBarProps) {
       </div>
       <div style={{ display: "flex", gap: "16px" }}>
         {line !== undefined && column !== undefined && (
-          <span>
-            Ln {line}, Col {column}
-          </span>
+          <span>{t("status.lineColumn", { line, column })}</span>
         )}
         <span>VBA</span>
       </div>

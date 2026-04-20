@@ -1,6 +1,7 @@
 import MonacoEditor from "@monaco-editor/react";
 import { useCallback, useEffect, useRef } from "react";
 import type { editor } from "monaco-editor";
+import { useTranslation } from "react-i18next";
 import { registerVbaLanguage, VBA_LANGUAGE_ID } from "../lib/monaco-vba";
 
 interface EditorProps {
@@ -28,6 +29,7 @@ export function Editor({
   onSave,
   onChange,
 }: EditorProps) {
+  const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const handleBeforeMount = useCallback((monaco: typeof import("monaco-editor")) => {
@@ -40,7 +42,7 @@ export function Editor({
 
       editor.addAction({
         id: "verde.save",
-        label: "Save",
+        label: t("editor.saveAction"),
         keybindings: [2048 | 49], // Ctrl+S
         run: () => {
           const value = editor.getValue();
@@ -48,7 +50,7 @@ export function Editor({
         },
       });
     },
-    [onSave]
+    [onSave, t]
   );
 
   const handleChange = useCallback(
