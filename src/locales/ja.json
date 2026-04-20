@@ -3,6 +3,7 @@
     "title": "Verde"
   },
   "common": {
+    "close": "閉じる",
     "dismiss": "閉じる",
     "fileTypeExcelMacro": "Excel マクロ"
   },

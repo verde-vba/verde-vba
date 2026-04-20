@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ModuleInfo } from "../lib/types";
 
 interface TabBarProps {
@@ -13,6 +14,7 @@ export function TabBar({
   onSelectModule,
   onCloseModule,
 }: TabBarProps) {
+  const { t } = useTranslation();
   if (openModules.length === 0) return null;
 
   return (
@@ -48,6 +50,8 @@ export function TabBar({
           >
             <span>{mod.filename}</span>
             <button
+              type="button"
+              aria-label={t("common.close")}
               onClick={(e) => {
                 e.stopPropagation();
                 onCloseModule(mod);

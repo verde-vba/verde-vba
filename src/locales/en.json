@@ -3,6 +3,7 @@
     "title": "Verde"
   },
   "common": {
+    "close": "Close",
     "dismiss": "Dismiss",
     "fileTypeExcelMacro": "Excel Macro"
   },
