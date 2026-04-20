@@ -47,10 +47,20 @@ export interface Settings {
   trust: TrustSettings;
 }
 
+/// Per-module hash report emitted by `check_conflict`. The three hashes
+/// correspond to the file in AppData, the value recorded in
+/// `.verde-meta.json`, and a fresh export from the live xlsm. An empty
+/// string means the module is missing from that source.
+export interface ConflictModule {
+  filename: string;
+  fileHash: string;
+  metaHash: string;
+  excelHash: string;
+}
+
 export interface ConflictInfo {
-  module_name: string;
-  verde_hash: string;
-  excel_hash: string;
+  projectId: string;
+  modules: ConflictModule[];
 }
 
 export type VbaModuleType = "standard" | "class" | "form" | "document";

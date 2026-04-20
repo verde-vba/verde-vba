@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectInfo, Settings } from "./types";
+import type { ConflictModule, ProjectInfo, Settings } from "./types";
 
 export async function openProject(xlsmPath: string): Promise<ProjectInfo> {
   return invoke<ProjectInfo>("open_project", { xlsmPath });
@@ -41,6 +41,30 @@ export async function syncFromExcel(xlsmPath: string): Promise<ProjectInfo> {
 
 export async function getProjectInfo(projectId: string): Promise<ProjectInfo> {
   return invoke<ProjectInfo>("get_project_info", { projectId });
+}
+
+/// Runs the three-way conflict detection. Returns the set of modules
+/// whose hashes disagree across AppData / meta / live Excel. Resolves to
+/// an empty array when nothing conflicts. Rejects when the Excel export
+/// step fails (typically non-Windows or Excel not installed); callers
+/// should treat that case as 'cannot check, skip' rather than 'no
+/// conflict'.
+export async function checkConflict(
+  projectId: string,
+  xlsmPath: string
+): Promise<ConflictModule[]> {
+  return invoke<ConflictModule[]>("check_conflict", {
+    projectId,
+    xlsmPath,
+  });
+}
+
+export async function resolveConflict(
+  projectId: string,
+  xlsmPath: string,
+  side: "verde" | "excel"
+): Promise<void> {
+  return invoke("resolve_conflict", { projectId, xlsmPath, side });
 }
 
 export async function getSettings(): Promise<Settings> {
