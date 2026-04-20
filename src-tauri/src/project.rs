@@ -7,6 +7,34 @@ use crate::conflict::{detect_conflicts, ConflictModule};
 use crate::settings::Settings;
 use crate::vba_bridge::VbaBridge;
 
+/// Locale-agnostic classification of a COM HRESULT extracted from the PS
+/// catch block's stderr. Sprint 25 / PBI #17: the legacy substring matcher
+/// in `EXCEL_OPEN_SUBSTRINGS` only catches English-locale wording; feeding
+/// classification off HRESULT bypasses that limitation entirely.
+///
+/// The variants intentionally cover only the kinds Verde currently branches
+/// on. Anything unrecognised goes into `Unknown(i32)` so diagnostics can
+/// still surface the raw value without pretending to classify it.
+#[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum ErrorKind {
+    ExcelOpen,
+    PermissionDenied,
+    NotFound,
+    Unknown(i32),
+}
+
+/// HRESULT values that all indicate "another process (Excel) holds the
+/// file open". Grouped here rather than inline in `classify_hresult` so
+/// a future locale- or API-driven addition (e.g. an OLE-specific variant)
+/// has a single, greppable home.
+///
+/// - `0x80070020` `ERROR_SHARING_VIOLATION` — file shared for delete/write
+/// - `0x80070021` `ERROR_LOCK_VIOLATION` — byte-range lock conflict
+#[allow(dead_code)]
+pub(crate) const EXCEL_OPEN_HRESULTS: &[i32] =
+    &[0x80070020u32 as i32, 0x80070021u32 as i32];
+
 /// Marker embedded in error messages when Excel is holding the workbook open
 /// (file locked, COM cannot save). The frontend can match on this prefix to
 /// surface a "close Excel first" dialog (PLANS §9 step 4).
@@ -178,6 +206,27 @@ impl ProjectManager {
     /// `#[allow(dead_code)]` is temporary: the Sprint 25 GREEN commit wires
     /// this helper into `classify_import_error`, at which point the allow
     /// must come off.
+    /// Map a HRESULT integer to Verde's classification enum.
+    ///
+    /// Pure function — no locale, no I/O. Intentional: keeps the Sprint 25
+    /// GREEN wiring trivial (PS emits -> parse_hresult_tag -> classify_hresult
+    /// -> branch) and makes macOS-side TDD viable without real COM.
+    ///
+    /// `#[allow(dead_code)]` parallel to `parse_hresult_tag`: both come off
+    /// in the GREEN commit.
+    #[allow(dead_code)]
+    pub(crate) fn classify_hresult(hresult: i32) -> ErrorKind {
+        if EXCEL_OPEN_HRESULTS.contains(&hresult) {
+            ErrorKind::ExcelOpen
+        } else if hresult == 0x80070005u32 as i32 {
+            ErrorKind::PermissionDenied
+        } else if hresult == 0x80030002u32 as i32 {
+            ErrorKind::NotFound
+        } else {
+            ErrorKind::Unknown(hresult)
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn parse_hresult_tag(stderr: &str) -> Option<i32> {
         for line in stderr.lines() {
@@ -590,6 +639,41 @@ mod tests {
         let stderr = "Some unrelated PowerShell error text\n0x80070020 appears here\n";
         assert_eq!(ProjectManager::parse_hresult_tag(stderr), None);
         assert_eq!(ProjectManager::parse_hresult_tag(""), None);
+    }
+
+    // --- Sprint 25 / PBI #17: classify_hresult (pure) ---
+
+    #[test]
+    fn classify_hresult_maps_sharing_violation_to_excel_open() {
+        // ERROR_SHARING_VIOLATION — canonical "another process has the file
+        // open for delete/write", which is exactly the Excel case.
+        let kind = ProjectManager::classify_hresult(0x80070020u32 as i32);
+        assert_eq!(kind, ErrorKind::ExcelOpen);
+    }
+
+    #[test]
+    fn classify_hresult_maps_lock_violation_to_excel_open() {
+        // ERROR_LOCK_VIOLATION — secondary Excel-holding-file signal. Pinned
+        // so a future refactor cannot accidentally drop it without tripping
+        // this test.
+        let kind = ProjectManager::classify_hresult(0x80070021u32 as i32);
+        assert_eq!(kind, ErrorKind::ExcelOpen);
+    }
+
+    #[test]
+    fn classify_hresult_maps_access_denied_to_permission_denied() {
+        // E_ACCESSDENIED — not Excel; a permissions problem. Classifying it
+        // separately means the UI can route it to a different dialog later.
+        let kind = ProjectManager::classify_hresult(0x80070005u32 as i32);
+        assert_eq!(kind, ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn classify_hresult_leaves_unrecognised_codes_in_unknown_bucket() {
+        // XlNamedRange (Excel-specific) — not one we branch on. Must fall
+        // through to Unknown with the raw i32 preserved for diagnostics.
+        let raw = 0x800A03ECu32 as i32;
+        assert_eq!(ProjectManager::classify_hresult(raw), ErrorKind::Unknown(raw));
     }
 
     #[test]
