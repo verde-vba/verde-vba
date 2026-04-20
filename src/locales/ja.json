@@ -66,5 +66,15 @@
     "wordWrap": "折り返し",
     "minimap": "ミニマップ",
     "autoSync": "保存時に自動でExcelに同期"
+  },
+  "errors": {
+    "projectNotFound": {
+      "title": "プロジェクトが見つかりません",
+      "message": "プロジェクトのメタデータが見つかりません。移動または削除された可能性があります。"
+    },
+    "projectMetadataCorrupted": {
+      "title": "プロジェクトメタデータが壊れています",
+      "message": ".verde-meta.json ファイルは存在しますが、解析できませんでした。手動編集の確認、またはバックアップからの復元を検討してください。"
+    }
   }
 }

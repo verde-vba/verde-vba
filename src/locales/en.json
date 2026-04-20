@@ -66,5 +66,15 @@
     "wordWrap": "Word Wrap",
     "minimap": "Minimap",
     "autoSync": "Auto sync to Excel on save"
+  },
+  "errors": {
+    "projectNotFound": {
+      "title": "Project not found",
+      "message": "The project metadata could not be located. It may have been moved or deleted."
+    },
+    "projectMetadataCorrupted": {
+      "title": "Project metadata is corrupted",
+      "message": "The .verde-meta.json file exists but could not be parsed. Check the file for manual edits or restore from backup."
+    }
   }
 }

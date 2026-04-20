@@ -8,6 +8,8 @@
 export type ParsedError =
   | { kind: "locked"; user: string; machine: string; time: string }
   | { kind: "excelOpen"; detail: string }
+  | { kind: "projectNotFound"; detail: string }
+  | { kind: "projectCorrupted"; detail: string }
   | { kind: "generic"; message: string };
 
 export function parseBackendError(raw: unknown): ParsedError {
@@ -23,6 +25,18 @@ export function parseBackendError(raw: unknown): ParsedError {
   }
   if (msg.startsWith("EXCEL_OPEN:")) {
     return { kind: "excelOpen", detail: msg.slice("EXCEL_OPEN:".length) };
+  }
+  if (msg.startsWith("project metadata is corrupted:")) {
+    return {
+      kind: "projectCorrupted",
+      detail: msg.slice("project metadata is corrupted:".length),
+    };
+  }
+  if (msg.startsWith("project not found:")) {
+    return {
+      kind: "projectNotFound",
+      detail: msg.slice("project not found:".length),
+    };
   }
   return { kind: "generic", message: msg };
 }
