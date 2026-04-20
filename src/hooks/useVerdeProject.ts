@@ -55,7 +55,11 @@ export function useVerdeProject() {
           if (modules.length > 0) {
             conflict = { projectId: project.project_id, modules };
           }
-        } catch {
+        } catch (e) {
+          // Swallow the failure to preserve the macOS / no-Excel fallback,
+          // but warn so a real regression does not hide behind the
+          // platform-missing case. The tag prefix makes the log greppable.
+          console.warn("checkConflict failed; opening without conflict check", e);
         }
         setState({
           project,
