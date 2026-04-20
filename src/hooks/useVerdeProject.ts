@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { ModuleInfo, ProjectInfo } from "../lib/types";
+import type { ConflictInfo, ModuleInfo, ProjectInfo } from "../lib/types";
 import * as commands from "../lib/tauri-commands";
 
 /// Sentinel message saveModule throws when the user tries to save while
@@ -14,6 +14,7 @@ interface VerdeProjectState {
   loading: boolean;
   error: string | null;
   readOnly: boolean;
+  conflict: ConflictInfo | null;
 }
 
 export function useVerdeProject() {
@@ -23,6 +24,7 @@ export function useVerdeProject() {
     loading: false,
     error: null,
     readOnly: false,
+    conflict: null,
   });
 
   // Shared open-flow: the three entry points differ only in which backend
@@ -38,12 +40,31 @@ export function useVerdeProject() {
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
         const project = await invoke(xlsmPath);
+        // Kick off the three-way conflict check before we reveal the
+        // editor. The check depends on Excel COM, so on macOS / when
+        // Excel is missing it will reject — swallow that failure so we
+        // don't break the open flow. "Cannot check" is not the same as
+        // "no conflict", but for MVP we prefer to get the user into the
+        // file over blocking on an undetectable conflict.
+        let conflict: ConflictInfo | null = null;
+        try {
+          const modules = await commands.checkConflict(
+            project.project_id,
+            xlsmPath
+          );
+          if (modules.length > 0) {
+            conflict = { projectId: project.project_id, modules };
+          }
+        } catch {
+          conflict = null;
+        }
         setState({
           project,
           activeModule: project.modules[0] ?? null,
           loading: false,
           error: null,
           readOnly,
+          conflict,
         });
       } catch (e) {
         setState((s) => ({
@@ -109,6 +130,23 @@ export function useVerdeProject() {
     }
   }, [state.project]);
 
+  const resolveConflict = useCallback(
+    async (side: "verde" | "excel") => {
+      // Guard both ways: no project means nothing to resolve, no
+      // conflict means we'd be reconciling a non-existent diff — either
+      // is a bug in the caller, but silently no-op'ing is safer than
+      // firing a spurious COM import.
+      if (!state.project || !state.conflict) return;
+      await commands.resolveConflict(
+        state.project.project_id,
+        state.project.xlsm_path,
+        side
+      );
+      setState((s) => ({ ...s, conflict: null }));
+    },
+    [state.project, state.conflict]
+  );
+
   return {
     ...state,
     openProject,
@@ -117,5 +155,6 @@ export function useVerdeProject() {
     setActiveModule,
     saveModule,
     syncToExcel,
+    resolveConflict,
   };
 }
