@@ -5,6 +5,16 @@ export async function openProject(xlsmPath: string): Promise<ProjectInfo> {
   return invoke<ProjectInfo>("open_project", { xlsmPath });
 }
 
+export async function forceOpenProject(
+  xlsmPath: string
+): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>("force_open_project", { xlsmPath });
+}
+
+export async function closeProject(xlsmPath: string): Promise<void> {
+  return invoke("close_project", { xlsmPath });
+}
+
 export async function saveModule(
   projectId: string,
   filename: string,
