@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Editor } from "./components/Editor";
 import { LockDialog } from "./components/LockDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -7,7 +8,7 @@ import { TabBar } from "./components/TabBar";
 import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useTheme } from "./hooks/useTheme";
-import { useVerdeProject } from "./hooks/useVerdeProject";
+import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./hooks/useVerdeProject";
 import { parseBackendError } from "./lib/error-parse";
 import type { ModuleInfo } from "./lib/types";
 
@@ -20,11 +21,14 @@ interface LockPrompt {
 
 function App() {
   const { resolved } = useTheme("system");
+  const { t } = useTranslation();
   const {
     project,
     activeModule,
+    readOnly,
     openProject,
     forceOpenProject,
+    openProjectReadOnly,
     setActiveModule,
     saveModule,
   } = useVerdeProject();
@@ -32,6 +36,9 @@ function App() {
   const [editorContent, setEditorContent] = useState("");
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
   const [excelOpenPrompt, setExcelOpenPrompt] = useState<string | null>(null);
+  const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(
+    null
+  );
   // TODO: migrate this flag to settings.rs (Settings.vbaTrustAcknowledged)
   // once the backend exposes it. localStorage is the MVP shortcut so the
   // first-launch guide doesn't reappear across sessions.
@@ -81,12 +88,16 @@ function App() {
     }
   }, [lockPrompt, forceOpenProject]);
 
-  const handleOpenReadOnly = useCallback(() => {
-    // TODO: Implement read-only mode once backend supports opening a project
-    // without acquiring the lock. For MVP, just dismiss the dialog.
-    console.warn("Read-only open is not yet implemented");
+  const handleOpenReadOnly = useCallback(async () => {
+    if (!lockPrompt) return;
+    const { xlsmPath } = lockPrompt;
     setLockPrompt(null);
-  }, []);
+    try {
+      await openProjectReadOnly(xlsmPath);
+    } catch (e) {
+      console.error("Read-only open failed:", parseBackendError(e));
+    }
+  }, [lockPrompt, openProjectReadOnly]);
 
   const handleLockCancel = useCallback(() => {
     setLockPrompt(null);
@@ -141,7 +152,15 @@ function App() {
       try {
         await saveModule(activeModule.filename, content);
         setExcelOpenPrompt(null);
+        setSaveBlockedPrompt(null);
       } catch (e) {
+        // Read-only saves short-circuit in the hook with a sentinel
+        // message — translate it here rather than leaking the constant
+        // into the render tree.
+        if (e instanceof Error && e.message === SAVE_BLOCKED_READONLY) {
+          setSaveBlockedPrompt(t("status.saveBlocked"));
+          return;
+        }
         const parsed = parseBackendError(e);
         if (parsed.kind === "excelOpen") {
           setExcelOpenPrompt(parsed.detail);
@@ -153,7 +172,7 @@ function App() {
       // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
       // is a save-time lock condition rather than a content conflict).
     },
-    [activeModule, saveModule]
+    [activeModule, saveModule, t]
   );
 
   return (
@@ -172,6 +191,21 @@ function App() {
         >
           {project ? (
             <>
+              {readOnly && (
+                <div
+                  role="status"
+                  style={{
+                    padding: "4px 12px",
+                    background: "var(--warning-bg, #fff4e5)",
+                    color: "var(--warning-text, #7a4b00)",
+                    borderBottom: "1px solid var(--border)",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {t("status.readOnly")}
+                </div>
+              )}
               <TabBar
                 openModules={openModules}
                 activeModule={activeModule}
@@ -195,6 +229,40 @@ function App() {
           )}
         </div>
       </div>
+
+      {saveBlockedPrompt && (
+        <div
+          role="alert"
+          style={{
+            padding: "8px 12px",
+            background: "var(--bg-secondary, #fff4e5)",
+            color: "var(--text-primary)",
+            borderTop: "1px solid var(--border)",
+            fontSize: "12px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
+          <span>{saveBlockedPrompt}</span>
+          <button
+            type="button"
+            onClick={() => setSaveBlockedPrompt(null)}
+            style={{
+              padding: "2px 10px",
+              background: "transparent",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border)",
+              borderRadius: "4px",
+              fontSize: "12px",
+              cursor: "pointer",
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {excelOpenPrompt && (
         <div
