@@ -948,3 +948,132 @@ coverage changes) before spending execution budget.
   gated).
 - Sprint 12 candidates A/B/C above are now part of the residual
   backlog with their "why not now" rationale attached.
+
+# Sprint 13 — Catalogue re-evaluation, no situation change
+
+## Goal
+
+Re-evaluate the Sprint 12 candidate catalogue (A / B / C) and the
+four external-input-gated follow-ups after one sprint's elapsed time.
+Explicitly confirm no situation change has promoted any candidate to
+"ready for execution" and record the re-evaluation in plan.md so
+Sprint 14 starts from a refreshed (not re-probed) backlog.
+
+## Scope
+
+- **Sole item**: re-scan `src/**` for the Candidate B signal — a
+  third `openModules` call site using a "match by filename" predicate
+  (the rule-of-three trigger Sprint 12 gated it on).
+- Confirm Candidates A and C retain their "why not now" rationale
+  (no new feature work, no product decision landed, no new consumer
+  forcing a boundary).
+- Confirm all four follow-ups remain external-input-gated.
+- **No code change**, **no sprint tag** — refinement-only, same
+  shape as Sprint 12.
+
+## Re-scan findings
+
+Probe executed:
+- `rg "openModules\.(find|filter|some|every|map|reduce)"` across
+  `src/**/*.{ts,tsx}` (and a broader `rg "openModules"` for context).
+
+Results (3 occurrences of `openModules.<iterator>`, matching the
+Sprint 12 probe outcome):
+
+| Location         | Expression                                                    | Pattern        | Counts toward B? |
+| ---------------- | ------------------------------------------------------------- | -------------- | ---------------- |
+| `App.tsx:174`    | `openModules.find((m) => m.filename === mod.filename)`        | filename-match | **yes**          |
+| `App.tsx:185`    | `openModules.filter((m) => m.filename !== mod.filename)`      | filename-match (negated) | **yes**  |
+| `TabBar.tsx:32`  | `openModules.map((mod) => {...})`                             | enumeration    | **no**           |
+
+`TabBar.tsx:32` is a list render, not a filename-predicate — it does
+not apply a `m.filename === X` / `m.filename !== X` test. Counting it
+toward B would dilute the rule-of-three into a rule-of-"any use of
+the same variable", which Sprint 4's `withLoadingState` deferral
+explicitly rejected.
+
+**Candidate B signal**: still **rule-of-two**, unchanged from Sprint
+12. Continues to defer.
+
+## Candidate A / C re-evaluation
+
+- **Candidate A** (`handleKeepFile` / `"verde"` naming asymmetry):
+  still blocked on a product / docs decision about the canonical
+  user-facing vocabulary (`"file"` vs `"verde"`). No product feedback
+  or UX pass has landed since Sprint 12. Continues to defer.
+- **Candidate C** (`App.tsx` 352 LOC responsibility split): no new
+  feature has introduced a second error-routing consumer, and no
+  restructure PBI has been planned with explicit test-refactor
+  scope. The "test-helper refactor vs temporary coverage gap"
+  tradeoff remains the same as Sprint 12. Continues to defer.
+
+## Follow-ups re-evaluation (four external-input-gated items)
+
+| Follow-up                                              | Gate                          | Status  |
+| ------------------------------------------------------ | ----------------------------- | ------- |
+| `TrustGuideDialog` URL / docs reference review         | Verde-owned docs page decision | deferred |
+| Sprint 5 sweep low-priority i18n (`"ID: "`, `"VBA"`, `"Verde"`) | per-item product decisions | deferred |
+| Optional `withLoadingState` helper                     | rule-of-three accumulation    | deferred |
+| Structured logging for `checkConflict`                 | telemetry noise evidence      | deferred |
+
+No external input (product decisions, telemetry, third call sites)
+has surfaced in the one sprint since Sprint 12. All four remain
+parked on their original gates.
+
+## Decision
+
+**Sprint 13 is refinement-only, no situation change.** One docs
+commit records the re-evaluation; no sprint tag (same reasoning as
+Sprint 12 — tags mark executable milestones for bisect, and a
+re-evaluation has nothing to bisect to).
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit | Type | Summary                                                   |
+| ------ | ---- | --------------------------------------------------------- |
+| (this) | docs | Record Sprint 13 catalogue re-evaluation (no changes)     |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — still green (unchanged: **32** tests across 5 files)
+- `bun run tsc --noEmit` — still clean (exit 0; untouched)
+- `cargo` — untouched (no Rust changes in Sprint 13)
+
+## Key decisions
+
+- **Two consecutive refinement-only sprints is a signal, not a
+  failure**: when the candidate pool is dominated by external-input-
+  gated items and rule-of-three-pending candidates, manufacturing an
+  execution burns trust in the prioritization discipline. Recording
+  "no change" preserves the audit trail and makes it visible when an
+  execution finally does land (Sprint 14+) that the gate genuinely
+  opened rather than eroded.
+- **`TabBar.tsx:32` explicitly excluded from Candidate B count**:
+  the rule-of-three predicate is "same pattern, not same variable".
+  A `.map` over `openModules` for list render is a categorically
+  different operation from a `.find` / `.filter` with a filename
+  equality predicate. Documenting this exclusion here prevents a
+  future planner from miscounting the signal.
+- **Re-scan executed even though the code was untouched**: 1
+  sprint's elapsed time includes the possibility that unrelated
+  feature work added a third call site. The probe is cheap (one
+  `rg` invocation) and the cost of miscounting is a missed Tidy
+  opportunity, so executing even when no interim work is expected
+  is the cheaper risk posture.
+- **No sprint tag, deliberately**: Sprint 12 set the precedent
+  that refinement-only sprints skip the tag. Tagging a second
+  no-change docs commit would muddy the `git tag` namespace without
+  adding a meaningful reference point — `git log --oneline plan.md`
+  already orders the refinements chronologically.
+
+## Follow-ups (out of Sprint 13 scope)
+
+- All four Sprint 11 follow-ups remain unchanged (external-input-
+  gated).
+- Sprint 12 candidates A / B / C remain unchanged (same "why not
+  now" rationale).
+- Sprint 14 should either (a) re-run the same re-evaluation probe
+  if no new PBI lands, or (b) pick up a fresh PBI from product
+  input if one arrives. A third consecutive refinement-only sprint
+  is acceptable but would argue for a proactive product / PBI
+  conversation rather than another silent re-scan.
