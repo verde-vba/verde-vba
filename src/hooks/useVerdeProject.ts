@@ -97,7 +97,7 @@ export function useVerdeProject() {
     [runOpen]
   );
 
-  const setActiveModule = useCallback((module: ModuleInfo) => {
+  const setActiveModule = useCallback((module: ModuleInfo | null) => {
     setState((s) => ({ ...s, activeModule: module }));
   }, []);
 
