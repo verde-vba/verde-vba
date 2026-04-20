@@ -9,7 +9,7 @@ All earlier sprints collapse to one-line rows in the index table below —
 commit-level detail. Compression-only sprints (like Sprint 16 itself) do
 not consume a detail slot, and probe-only refinement sprints occupy one
 slot at whatever density their outcome requires (often < 50 lines).
-Currently detailed: Sprint 15 / 17 / 18. A planner adding a new sprint
+Currently detailed: Sprint 18 / 19 / 20. A planner adding a new sprint
 section must demote the now-oldest detailed sprint into the index row in
 the same commit.
 
@@ -29,116 +29,9 @@ the same commit.
 | 12     | Backlog refinement only, candidates A / B / C enumerated                        | Docs `635a1af` — no code changes; rule-of-two Candidate B, product-gated A, restructure-PBI-gated C. |
 | 13     | Catalogue re-evaluation, no situation change                                    | Docs `651306c` — `openModules` probe confirmed 2 sites (still rule-of-two); A / C / four follow-ups unchanged; tests 32/32. Tail advisory: a third refinement-only sprint would argue for product conversation. |
 | 14     | Third consecutive refinement-only; escalation advisory to product               | Docs `951c55c` — no code change; `openModules` probe + `git log` re-run unchanged; **Sprint 15 planning must include proactive product / PBI conversation** (durable signal). |
+| 15     | Type-bypass arc completion for `main.tsx` root lookup                           | `8e15c3d` guard root element lookup (non-null assertion removed); docs `22cd27c`. Arc closed for `src/**`; post-sprint probe (`\!\.`, `as\s+[A-Z]`) added to Sprint 16+ checklist. |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
-
-# Sprint 15 — Type-bypass arc completion for `main.tsx` root lookup
-
-## Goal
-
-Close the last remaining non-null assertion under `src/**`:
-`document.getElementById("root")!` at `src/main.tsx:9`. Sprint 11's
-plan.md declared the "type-system bypass" arc complete with a
-post-sprint grep, but that probe concentrated on
-`src/App.tsx` / `src/hooks/` / `src/components/` and missed the
-entry-point residual. Sprint 15 rectifies the claim and finishes the
-arc by guard-ing the root element lookup.
-
-## Path chosen
-
-Sprint 14 offered four paths: (1) proactive product/PBI conversation —
-out-of-band channel unavailable; (2) fresh PBI pickup — none arrived;
-(3) **chosen**: deliberate Tidy with explicit rationale — `src/**` probe
-surfaced an entry-point non-null assertion, *not* a rule-of-two
-duplication, so rationale is "arc completion / prior probe correction"
-rather than rule relaxation; (4) observability / test-coverage — not
-needed since path 3 yielded a concrete deliverable.
-
-## Scope
-
-- Replace `createRoot(document.getElementById("root")!).render(...)`
-  with a lookup → guard → createRoot sequence that throws a named
-  `Error("Root element #root not found")` if the DOM lacks the
-  expected mount point.
-- No test added: `main.tsx` is the composition root; testing it would
-  require jsdom-ing a full document tree just to assert "throws on
-  missing #root". Regression surface is `tsc --noEmit` plus the 32-test
-  suite exercising App tree behavior.
-- No new dependencies, no locale keys.
-
-## Probes executed (3 of 3 budget)
-
-1. `rg "openModules\.(find|filter|some|every)"` across `src/**` —
-   confirmed Candidate B still rule-of-two (2 sites at `App.tsx:174`
-   / `:185`). No change since Sprint 12–14.
-2. `rg "\bas\s+(string|number|boolean|unknown|any)\b|:\s*any\b|<any>|!\s*[.)\]]"` —
-   surfaced two hits: `monaco-vba.ts:89` (false positive — regex
-   literal `[=<>!]+`) and **`main.tsx:9` (genuine non-null assertion)**.
-   This is the Tidy target.
-3. `rg "^export\s+(function|const|class|interface|type)\s+"` —
-   confirmed no obvious dead-export candidates.
-
-Dead-code (c), test-hygiene (d), and naming (e) candidates from the
-brief were not pursued: (c) no high-confidence targets; (d) existing
-test helpers already carry the discipline; (e) no concrete surface.
-
-## Changes landed (on `main`, not pushed)
-
-| Commit  | Type         | Summary                                                 |
-| ------- | ------------ | ------------------------------------------------------- |
-| 8e15c3d | refactor(ui) | Guard root element lookup instead of non-null assertion |
-| 22cd27c | docs         | Record Sprint 15 plan and outcomes                      |
-
-## Acceptance criteria (verified)
-
-- `bun run test` — all green (**32** tests across 5 files)
-- `bun run tsc --noEmit` — clean (exit 0)
-- `cargo` — untouched
-
-## Key decisions
-
-- **Arc completion, not rule-of-three relaxation**: Sprint 14's
-  guidance (3a) mentioned "deliberately-chosen rule-of-two Tidy with
-  rule-relaxation rationale documented". Sprint 15's target is a
-  *single* non-null assertion at an entry point, not a rule-of-two
-  duplication pattern. Rationale category is "prior claim correction
-  + arc completion", not "rule relaxation". A future planner reading
-  "Sprint 15 executed despite rule-of-two" should not infer a general
-  relaxation of the rule-of-three gate.
-- **Named `Error` over React's implicit `TypeError`**: React's
-  `createRoot(null)` emits a `TypeError` whose message depends on
-  React version and is hard to recognize in an error log. A named
-  error at the boundary is one grep away from the diagnosis. Behavior
-  diff is restricted to error diagnostic text — the app still
-  fails-fast at the same point, with a clearer signal.
-- **No unit test for the guard**: `main.tsx` is the composition root;
-  the guard is 4 lines with trivially inspectable behavior, and the
-  real regression surface (someone removes `<div id="root">`) would
-  be caught by any smoke test that boots the app.
-- **Sprint 11's claim corrected, not just extended**: Sprint 11 stated
-  the arc was complete; this section explicitly acknowledges that
-  probe missed the entry-point file so future planners can calibrate
-  trust in past probes.
-- **Two-commit shape preserved (refactor + docs)**: consistent with
-  Sprints 7 / 10 / 11; bundling would pollute `git blame` on
-  `src/main.tsx`.
-
-## Follow-ups (out of Sprint 15 scope)
-
-- All four Sprint 11 external-gated follow-ups remain unchanged.
-- Sprint 12 Candidates A / C unchanged; **Candidate B** unchanged but
-  worth re-confirming once any new feature touches tabbed-module state
-  (e.g. a "focus next tab by filename" handler would be the third
-  call site tipping B into execution range).
-- **Post-Sprint 15 bypass status**: one more targeted probe
-  (`rg "\!\." src/` + `rg "as\s+[A-Z]" src/`) should be added to the
-  Sprint 16+ planning checklist before declaring the arc closed again.
-  The Sprint 11 probe pattern (limit search to App/hooks/components)
-  is now a known blind spot.
-- Sprint 16 default: re-run the product / PBI escalation prompt from
-  Sprint 14's tail guidance. Sprint 15 executed a technical Tidy
-  without product input; that is a one-time exception for arc
-  completion, not a new autonomy charter.
 
 # Sprint 17 — Probe-only refinement; one new backend-gated follow-up surfaced
 
@@ -455,4 +348,84 @@ PBI 投入）により解除され、Sprint 18 として security 4 件に着地
 - **Pause が有効だったのは期間が短かったから**ではなく、「silent probe
   を禁じる」ルールを明示していたから。次に Pause に入る場合もこの
   構造を維持すること（期間は成り行き、条件は厳格）。
+
+# Sprint 20 (2026-04-21) — C5 ReadOnlyBar component 抽出 + type-bypass Tidy
+
+## Goal
+
+Sprint 19 でスコープ超過として defer した C5 (ReadOnly WarningBar) を
+TDD で実装する。合わせて Sprint 15 follow-up の bypass re-probe を実行し、
+`useSave.test.ts` に残存した冗長 widening キャストを除去する。
+
+## Probes executed (Sprint start)
+
+1. `rg '\!\.' src/` → **0 hits**。production code に non-null member access なし。
+2. `rg 'as\s+[A-Z]' src/` → **2 ファイル**:
+   - `src/lib/error-parse.test.ts:133`: `acc as Record<string, unknown>` —
+     `typeof acc === "object"` ガード後の index access に必要な assertion。
+     `object` 型は index access を持たないため冗長ではない。保持。
+   - `src/hooks/useSave.test.ts:12,17`: `mod1 as ModuleInfo | null` /
+     `"path" as string | null` — TypeScript が自動 widen するため不要。
+     REFACTOR コミットで除去。
+3. Backlog #12 (ConflictDialog): `App.tsx:217–223` で open-path は配線済み。
+   `useSave.ts:42` に save-path の TODO が残存 — backend が save 中の
+   content-conflict error-kind を返さないため引き続き backend-gated。
+
+## C5 再評価
+
+「小さすぎる」か否かを probe した結果:
+- Sprint 19 での defer 理由はスコープ超過（C1–C4 4本連続後の疲弊）であり、
+  component 化の価値否定ではない。
+- `ReadOnlyBar` は `role="status"` + CSS variables + i18n key を持つ
+  完結した presentational unit。抽出により App.tsx の render tree が
+  合成責務に集中し、テスト境界が明確化される。
+- 既存パターン（`Banner`, `TabBar`, `LockDialog` 等）と同形で、
+  条件付きレンダーは App.tsx 側が担う（`show` prop なし）。
+
+## TDD サイクル
+
+| フェーズ | 内容 |
+| -------- | ---- |
+| RED  | `ReadOnlyBar.test.tsx` 作成 — `role="status"` と翻訳テキストを assert |
+| GREEN | `ReadOnlyBar.tsx` 作成 — 最小実装でテスト GREEN |
+| REFACTOR | App.tsx: inline JSX → `<ReadOnlyBar />`; `useSave.test.ts`: 冗長 widening キャスト除去 |
+
+## 変更コミット
+
+| Commit  | 内容 |
+| ------- | ---- |
+| (RED)   | `test(ui): ReadOnlyBar renders role="status" with read-only warning` |
+| (GREEN) | `refactor(ui): extract ReadOnlyBar component (C5)` |
+| (REFACTOR) | `refactor(ui): inline ReadOnlyBar in App.tsx; tidy useSave.test widening casts` |
+| (docs)  | このセクション + Sprint 15 index demotion |
+
+## 受け入れ基準 (達成)
+
+- `bun run test` **63/63** 緑 (既存 62 + ReadOnlyBar 1 追加)
+- `bun run tsc --noEmit` クリーン
+- App.tsx LOC: 229 → 215 (ReadOnlyBar inline JSX 13行 → 1行)
+- `cargo test --lib` 未変更 (backend 無変更)
+
+## Key decisions
+
+- **`show` prop なし**: 既存コンポーネント群（`LockDialog`, `TrustGuideDialog` 等）
+  と同様に、条件付きレンダーは呼び出し側 App.tsx が担う。コンポーネントが
+  自分の表示/非表示を制御する props を持つと責務の漏洩になる。
+- **`vi.fn() as (...)` キャストは保持**: `vi.fn()` が返す `Mock` 型を
+  呼び出し側で期待する signature に強制するのは vitest の慣用パターン。
+  `vi.fn<(s: string | null) => void>()` の代替はあるが、既存テストの
+  一貫性を優先し今 Sprint ではリスコープしない。
+- **バックログ #12 (save-path) はそのまま**: backend に content-conflict
+  error-kind がないため実装不可。`useSave.ts:42` TODO は状態変化まで保持。
+- **type-bypass arc**: `!\. src/` ゼロ hit で arc は維持されている。
+  `as\s+[A-Z]` の production hits ゼロ確認 — テストコードの冗長キャスト
+  2件を除去して arc の品質も前進。
+
+## Follow-ups
+
+- Backlog #12 は backend が save-path の content-conflict error-kind を
+  返すようになったら `useSave.ts:42` TODO を実装起点として PBI 化する。
+- `vi.fn<(...)>()` スタイルへの統一は rule-of-three 到達後に検討。
+- Sprint 18 follow-ups (#15, #16, #17) は引き続き design-weight
+  items — explicit Planning を要する。
 
