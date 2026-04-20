@@ -77,9 +77,10 @@ untranslated raw string.
 - ~~**`saveBlockedPrompt` / `excelOpenPrompt` still carry hardcoded
   English** ("Dismiss", "Cannot save while Excel has the workbook
   open.").~~ Addressed in Sprint 4 (B-stream).
-- **`ConflictDialog` i18n parity**: dialog text has not yet been audited
+- ~~**`ConflictDialog` i18n parity**: dialog text has not yet been audited
   for the same localization pass that `routeParsedError` completed for
-  banners.
+  banners.~~ Closed in Sprint 5 — Phase 1 probe revealed all
+  `conflict.*` keys already in place; no changes needed.
 - **`TrustGuideDialog` consolidation**: still has an inline
   `window.open` to a Microsoft support URL with a TODO for a Verde-owned
   docs page.
@@ -160,16 +161,122 @@ inside the `saveBlocked` and `excelOpen` banner prompts.
 
 ## Follow-ups (out of Sprint 4 scope)
 
-- **`ConflictDialog` i18n pass** — still outstanding from Sprint 3.
+- ~~**`ConflictDialog` i18n pass** — still outstanding from Sprint 3.~~
+  Closed in Sprint 5 — probe revealed full i18n coverage already present.
 - **`TrustGuideDialog` URL / docs reference review** — still pointing
   at a Microsoft support URL.
 - **`handleCloseModule` `null!` narrowing** — widen the hook signature
   to accept `null` rather than force-casting.
 - **`checkConflict` silent failure path** — at least a `console.warn`
   so a real regression doesn't hide behind the platform-missing case.
-- **`"Excel Macro"` file-dialog filter string in `App.tsx`** — Sprint 4
+- ~~**`"Excel Macro"` file-dialog filter string in `App.tsx`** — Sprint 4
   did NOT address this hardcoded English. Tiny candidate for a
-  Sprint 5 i18n follow-up.
+  Sprint 5 i18n follow-up.~~ Closed in Sprint 5 (commit `2bd8fd4`).
 - **Optional: `withLoadingState` helper** — adopt only if the
   loading-flag shape proliferates beyond the current three mutation
   hooks.
+
+# Sprint 5 — File-dialog filter i18n and hardcoded-English sweep
+
+## Goal
+
+Close the remaining i18n gap on the file-dialog filter name and
+establish a prioritized catalogue of remaining hardcoded English across
+`src/App.tsx` and `src/components/*.tsx` for future sprints.
+
+## Scope
+
+- **B-stream**: i18n `"Excel Macro"` filter name in `App.tsx` with a
+  new `common.fileTypeExcelMacro` key in en/ja.
+- **Sweep**: read-only catalogue of remaining hardcoded English across
+  `src/App.tsx` and every file under `src/components/`.
+- **A-stream** originally targeted `ConflictDialog` but was found
+  already fully i18n'd at probe time — no work needed; the follow-up
+  is closed as stale.
+
+## Changes landed (all on `main`, not pushed)
+
+| Commit  | Type      | Summary                                                              |
+| ------- | --------- | -------------------------------------------------------------------- |
+| 2bd8fd4 | feat(ui)  | i18n Excel file-dialog filter name                                   |
+| 167bc95 | test(ui)  | Characterize Excel filter name i18n wiring at the dialog call site   |
+| (this)  | docs      | Record Sprint 5 plan, sweep results, and Sprint 3/4 follow-up closures |
+
+## Acceptance criteria (verified)
+
+- `bun run test` — all green (final count: **27** tests across 4 files)
+- `bun run tsc --noEmit` — clean
+- `cargo` — untouched (no Rust changes in Sprint 5)
+
+## Key decisions
+
+- **`common.fileTypeExcelMacro` chosen over `menu.*`**: the file-type
+  label is a reusable surface (any future "choose file" dialog can
+  reuse it), not a menu action, so it belongs in `common`.
+- **ConflictDialog follow-up closed without modification**: the probe
+  revealed full i18n coverage via `conflict.*` keys already in place.
+  Documenting this in plan.md is more valuable than manufacturing a
+  no-op commit.
+- **One characterization test pins the wiring**: the test asserts
+  `filters[0].name === t("common.fileTypeExcelMacro")` by inspecting
+  the `plugin-dialog` open call arguments, which proves the wiring
+  survives any future refactor of `handleOpenFile`.
+- **Sprint 5 intentionally small-scoped to validate "probe before
+  implement"**: probing ConflictDialog before writing a test prevented
+  redundant work on an already-complete target — a pattern worth
+  repeating at the start of every follow-up-driven sprint.
+- **Phase 6 tidy skipped**: the Sprint 5 diff was intentionally small
+  (1 swap + 3 locale lines + 1 test). Genuine structural wins were
+  evaluated (locale-key ordering, test-helper reuse, mock consistency)
+  and none warranted a `refactor:` commit.
+
+## Sprint 5 follow-ups (sweep findings)
+
+Cataloged read-only; DO NOT assume any of these are scheduled. They
+are priority-ranked for future sprint planning.
+
+### Medium priority
+
+- **`TabBar.tsx:62` — close button `×` glyph has no `aria-label`.**
+  Screen readers announce nothing for the per-tab close button. This
+  is an accessibility gap rather than an i18n swap: add
+  `aria-label={t("common.close")}` (new key) or similar.
+- **`App.tsx:158` — Microsoft support URL hardcoded in
+  `handleTrustHowTo`.** Already noted in Sprint 3/4 follow-ups as
+  "TrustGuideDialog URL / docs reference review".
+
+### Low priority
+
+- **`StatusBar.tsx:30` — `"ID: "` prefix before the project ID
+  slice.** User-visible but tiny; ambiguous whether it needs i18n
+  (labels like "ID" often stay untranslated).
+- **`StatusBar.tsx:37` — `"VBA"` language tag at bottom-right.**
+  Ambiguous: `"VBA"` is a proper noun (the language name) and is
+  generally not translated across locales. Flag for human review.
+- **`WelcomeScreen.tsx:23` — `"Verde"` brand headline.** Brand/proper
+  noun; conventionally not translated, but flagged for explicit
+  product decision.
+
+### Not i18n candidates (cataloged for completeness)
+
+- `Sidebar.tsx:12–15` — emoji icons (`📄`, `🔷`, `🖼`, `📊`) keyed by
+  `moduleTypeLabel`. Technical identifier mapping.
+- `App.tsx:121` — `console.log("File dialog not available outside
+  Tauri")`. Developer/debug, never user-visible in prod.
+- `Editor.tsx:89` — `fontFamily: "'Cascadia Code', 'Consolas',
+  monospace"`. CSS font stack; technical identifier.
+
+## Sprint 3/4 follow-ups update
+
+- ~~ConflictDialog i18n pass~~ — **closed (already complete prior to
+  Sprint 5; no changes needed)**.
+- ~~"Excel Macro" file-dialog filter~~ — **closed (Sprint 5, commit
+  `2bd8fd4`)**.
+- ~~Loading-flag asymmetry~~ — already closed in Sprint 4.
+- ~~`saveBlockedPrompt` / `excelOpenPrompt` hardcoded English~~ —
+  already closed in Sprint 4.
+- **`TrustGuideDialog` URL / docs reference review** — still
+  outstanding.
+- **`handleCloseModule` `null!` narrowing** — still outstanding.
+- **`checkConflict` silent failure path** — still outstanding.
+- **Optional: `withLoadingState` helper** — still outstanding.
