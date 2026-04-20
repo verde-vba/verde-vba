@@ -9,14 +9,15 @@ All earlier sprints collapse to one-line rows in the index table below —
 commit-level detail. Compression-only sprints (like Sprint 16 itself) do
 not consume a detail slot, and probe-only refinement sprints occupy one
 slot at whatever density their outcome requires (often < 50 lines).
-Currently detailed: Sprint 25 / 26 / 27. A planner adding a new sprint
+Currently detailed: Sprint 26 / 27 / 28. A planner adding a new sprint
 section must demote the now-oldest detailed sprint into the index row in
 the same commit. Sprint 17–19 were folded into index rows during Sprint
 24 housekeeping (closing a pre-existing detail-drift). Sprint 23 was
 demoted during Sprint 26 housekeeping. Sprint 24 was demoted during
-Sprint 27 housekeeping.
+Sprint 27 housekeeping. Sprint 25 was demoted during Sprint 28
+housekeeping.
 
-## Sprint 3–24 summary index
+## Sprint 3–25 summary index
 
 | Sprint | 主題                                                                            | 主要コミット                                                                    |
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -41,6 +42,7 @@ Sprint 27 housekeeping.
 | 22     | `#15` PS 引数渡しアーキテクチャ設計 (Planning-only, docs commit)                 | `f3dbd32` 設計記録: Approach 1 (env-var 経由) を採択。Approach 2 (`-File` + 一時ファイル) は `tempfile` crate 追加 + クラッシュ残留リスクでコスト過大、Approach 3 (escape 強化) は injection 根絶せず却下。Rust `Command::env("VERDE_*", ...)` / PS `$env:VERDE_*` / `VERDE_` prefix policy を確定。実装は Sprint 23 で履行 (`9cc2c12`)。 |
 | 23     | `#15` 実装: PS 引数を env-var 経由へ移行 (Planning → 実装 pattern 成立)         | `4c00585` Tidy First (PS 本体 `const` 昇格 + `str::replace`); `cf84fd8` RED (injection-flavored → platform error); `9cc2c12` GREEN (env-var 経路配線 + `validate_ps_arg` + injection tests 削除, -9 → 48 Rust tests); docs `f3dbd32`. `.env_clear()` 不使用 (PS `PSModulePath` 等親プロセス依存を破壊しない) と denylist 完全削除 ("env-var が構造的排除なので validator 残置は anti-pattern 誘発") が durable 判断。Unicode/`$` 含みパスは副次的に回復。`vba_bridge.rs` source を grep すれば `$env:VERDE_*` マッピング 4 件は現物確認可能。 |
 | 24     | `#16` / `#17` design-weight 評価 Planning-only + Sprint 17–19 index demotion    | docs-only (no code commits). Sprint 25 着手対象を `#17` (HRESULT EXCEL_OPEN) に確定。採択根拠: user-visible value (日本語 Excel の EXCEL_OPEN ダイアログ完全不発) × Sprint 18 pinned-negative が自然な RED × pure helper で macOS full TDD × Sprint 23 成果 (PS static const) が基盤。`#16` 後回し理由: 3 OS 分岐 + dev-env fallback で design surface が #17 の約 2 倍、TTL 7d fallback で「待てば解ける」問題に圧縮済み。`sysinfo` crate 却下 ("1 箇所の needs に対して依存代償過大"、`windows`/`libc` 既存 FFI surface で足りる) が durable。再評価 trigger (i) production PID reuse 報告 (ii) `#17` 完了後の Sprint N として起票、の 2 本で保留を確定ステータスに格上げ。Sprint 17–19 の詳細 section を index row へ折り畳み、plan-bloat rule ("3 most recent detailed") への pre-existing drift を閉鎖。Commit discipline notes section (`$` HEREDOC escape rule) を本 Sprint で新設。 |
+| 25     | `#17` 実装: HRESULT EXCEL_OPEN 分類 (locale 非依存化)                           | `d6c2d88` Tidy1 (`parse_hresult_tag` pure helper + 3 tests, `#[allow(dead_code)]`, 48 → 51); `32be5c3` Tidy2 (`ErrorKind` enum + `EXCEL_OPEN_HRESULTS` + `classify_hresult` + 4 tests, 51 → 55); `799f77e` RED (Sprint 18 pinned-negative を positive flip + JP fixture `VERDE_HRESULT=0x80070020`); `6578c40` GREEN (`concat!` で `HRESULT_CATCH` 合成 / `InnerException.HResult` 優先 / `is_excel_open_error` 先頭に HRESULT 経路配線, 55 passed); `8b86c72` Tidy-after (substring fallback 残置判断 + pin 2 件 `E_ACCESSDENIED`/tagless-english で 55 → 57); docs `aa?` 等。Durable 判断: HRESULT 先・substring 後経路固定、`concat!` で外部 crate 追加ゼロ (Sprint 22 `tempfile` / 本 Sprint `const_format` 却下と並ぶ)、`InnerException.HResult` 優先で `.NET` `TargetInvocationException` wrap をカバー、`ErrorKind` 3 variants (`PermissionDenied`/`NotFound`/`Unknown`) は UI branches 未配線で variant 単位 `#[allow(dead_code)]`。JP-locale 実機 verify は post-Sprint follow-up として Sprint 28 F4 候補化。 |
 
 Sprint 5 sweep non-i18n catalogue (technical identifiers, not localization targets — future sweeps should skip): `Sidebar.tsx:12–15` emoji icons; `App.tsx:121` dev console.log; `Editor.tsx:89` CSS font stack.
 
@@ -98,202 +100,6 @@ PBI 投入）により解除され、Sprint 18 として security 4 件に着地
 - **Pause が有効だったのは期間が短かったから**ではなく、「silent probe
   を禁じる」ルールを明示していたから。次に Pause に入る場合もこの
   構造を維持すること（期間は成り行き、条件は厳格）。
-
-# Sprint 25 (2026-04-21) — #17 実装: HRESULT EXCEL_OPEN 分類
-
-## Goal
-
-Sprint 24 Planning の判断に従い、日本語ロケール Excel の COM 例外で
-EXCEL_OPEN ダイアログが永久に発火しない問題を解決する。PS `try/catch` で
-`$_.Exception.HResult` を `VERDE_HRESULT=0x{0:X8}` タグとして stderr に
-emit し、Rust 側 pure parser + `ErrorKind` enum + `classify_hresult` が
-タグを抽出して locale 非依存に分類する。Sprint 18 で pin した
-negative-assertion を positive へ反転して契約を履行。
-
-## Tidy First 分離
-
-| 段階 | コミット | 種別 | 内容 |
-|------|----------|------|------|
-| 1 | `d6c2d88` | Tidy (構造のみ) | `parse_hresult_tag(stderr: &str) -> Option<i32>` を pure helper として追加 (hex / decimal / none の 3 tests)。`#[allow(dead_code)]` で一時的 dead にする — 挙動不変、48 → 51 Rust tests。 |
-| 2 | `32be5c3` | Tidy (構造のみ) | `ErrorKind` enum (`ExcelOpen / PermissionDenied / NotFound / Unknown(i32)`) + `EXCEL_OPEN_HRESULTS` const + `classify_hresult` を追加 (4 tests)。こちらも未配線、挙動不変、51 → 55 Rust tests。 |
-| 3 | `799f77e` | RED | Sprint 18 `is_excel_open_error_documents_known_japanese_locale_miss` を positive 方向に flip + `VERDE_HRESULT=0x80070020` を含む JP fixture に更新。substring 経路のみで HRESULT 未配線のため 1 failed 確定。 |
-| 4 | `6578c40` | GREEN (挙動変更) | `is_excel_open_error` の先頭で `parse_hresult_tag` → `classify_hresult` を走らせ、`ErrorKind::ExcelOpen` なら true を返す経路を追加 (substring fallback は後続に残置)。PS scripts に `HRESULT_CATCH` 定数を注入し `concat!` で `EXPORT_SCRIPT` / `IMPORT_SCRIPT` を合成。catch は `Exception.InnerException.HResult` 優先 → `Exception.HResult` fallback → `throw` で rethrow (exit code は保存)。`#[allow(dead_code)]` 解除。RED test が GREEN に反転、55 passed。 |
-| 5 | `8b86c72` | Tidy (後) | substring fallback 存廃判断。decision: **残す** — PS プロセスが try block 到達前に死ぬケース (process spawn 失敗 etc) ではタグが emit されない。2 pins を追加: (i) 非 EXCEL_OPEN HRESULT タグ (`E_ACCESSDENIED`) を拾わない、(ii) タグ無し英語 stderr は fallback で classify される。55 → 57 Rust tests。 |
-| 6 | (docs) | docs | 本セクション + preamble 更新 + Sprint 22 index demotion + backlog #17 close。 |
-
-## 実装の要点
-
-### PS 側 `HRESULT_CATCH` (共有定数)
-
-```powershell
-} catch {
-    $h = 0
-    if ($_.Exception) {
-        if ($_.Exception.InnerException -and $_.Exception.InnerException.HResult) {
-            $h = $_.Exception.InnerException.HResult
-        } elseif ($_.Exception.HResult) {
-            $h = $_.Exception.HResult
-        }
-    }
-    [Console]::Error.WriteLine(("VERDE_HRESULT=0x{0:X8}" -f $h))
-    throw
-```
-
-`EXPORT_SCRIPT` / `IMPORT_SCRIPT` は Rust `concat!` macro で
-`[body, HRESULT_CATCH, "} finally { ... }"]` を連結。`concat!` は stdlib
-macro なので追加依存ゼロ (Sprint 22 Planning で検討した `tempfile` 追加案と
-対照的)。`InnerException.HResult` 優先は `TargetInvocationException`
-wrapping パターン (`.NET` が COM 例外を包む典型) をカバーするため。
-
-### Rust 側 wiring
-
-```rust
-pub(crate) fn is_excel_open_error(err_msg: &str) -> bool {
-    if let Some(hresult) = Self::parse_hresult_tag(err_msg) {
-        if Self::classify_hresult(hresult) == ErrorKind::ExcelOpen {
-            return true;
-        }
-    }
-    // substring fallback は後続に残置 (Sprint 25 Tidy-after judgment)
-    ...
-}
-```
-
-HRESULT 経路を先に走らせ、非 EXCEL_OPEN HRESULT は fallback に落ちる。
-`E_ACCESSDENIED` (0x80070005) は `PermissionDenied` に分類される =
-ExcelOpen にはならない = fallthrough する = substring 非マッチで false。
-commit 5 の 1 つ目の pin がこの invariant を固定。
-
-## 受け入れ基準 (達成)
-
-- `cargo test --lib` **57 passed** (Sprint 24 予測 55 に対し +2; Tidy-after の pin 2 件ぶん上振れ)
-- `cargo clippy --lib -- -D warnings` クリーン
-- `bun run test` **63/63** 緑 (frontend 無変更)
-- `bun run tsc --noEmit` クリーン
-- `rg 'VERDE_HRESULT=' src-tauri/` → PS `HRESULT_CATCH` 1 箇所 (export/import で共有) + Rust parser / tests で参照
-- Sprint 18 pinned-negative test が positive 方向 GREEN
-- plan.md preamble `Currently detailed: 23 / 24 / 25`、Sprint 22 index demotion 完了、backlog #17 クローズ
-
-## Planning 予測との差分
-
-- Sprint 24 予測 `+7 → 55 tests`。実測 `+9 → 57 tests`。差分は commit 5
-  (Tidy-after) で pin した 2 件の intentional 追加。Sprint 24 Sprint Goal 草案
-  で "substring fallback 存廃判断" とのみ書かれていた commit を、pure
-  structural judgment (残置) + test pin 2 件へ具体化した結果。overrun ではなく
-  judgement が structural test に落ちた形。
-- Sprint 24 Sprint Goal 草案では commit 1 が `parse_hresult_tag`、commit 2 が
-  `classify_hresult + ErrorKind` の順だった。履行通り。user プロンプトの
-  paraphrase 順 (PS catch → enum) ではなく Sprint 24 Sprint Goal 草案順
-  (pure helpers first) を優先した — PS 編集は stderr 内容を変えるため
-  「構造のみ」の約束を崩す判断。
-- `HRESULT_CATCH` を PS script 2 箇所で重複させず、`concat!` で共有する
-  判断は草案になかった局所判断。`const_format` crate 検討 → stdlib `concat!`
-  で十分と確認 → 採用。
-
-## Key decisions
-
-- **HRESULT 先・substring 後**: 経路優先順位を固定。`is_excel_open_error` の
-  先頭で HRESULT 経路を走らせ、タグが無い or 非 EXCEL_OPEN HRESULT の場合に
-  limited に substring fallback。逆順 (substring → HRESULT) にすると英語
-  locale で false positive を拾ったときに HRESULT に訂正する経路が無い。
-- **substring fallback を即削除しない**: Sprint 23 の `validate_ps_arg`
-  削除は「env-var が構造的排除」という強保証があったため即削除可能だった。
-  substring は HRESULT 経路が「PS catch が必ず実行される」保証の上で同じ
-  強保証に到達するが、catch に入る前の process 失敗 (spawn error, PS startup
-  失敗 etc) はタグを emit しない。Windows 実機 CI が無い今、「タグ無し経路でも
-  分類できる」保険を残す判断。commit 5 の 2 つ目の pin がこの invariant を固定。
-- **`concat!` macro で PS scripts を合成**: Sprint 23 で `format!` → `const`
-  昇格時に `str::replace` 経路を導入したが、今回は placeholder substitution
-  不要 (HRESULT_CATCH は 2 script で完全同一)。stdlib macro で依存追加ゼロ、
-  Sprint 22 で却下した `tempfile` / Sprint 25 で検討した `const_format` と
-  並んで「外部 crate を避ける」原則を履行。
-- **`InnerException.HResult` 優先**: `.NET` は COM exception を
-  `TargetInvocationException` で wrap することが多く、`$_.Exception.HResult` は
-  wrap の HResult (典型: `0x80131604` `TargetInvocationException`) を返す。
-  wrapped の内側に本物の COM HResult (`0x80070020` etc) が入っている。
-  macOS 環境では Windows 実機を持たないため InnerException 優先ルールを
-  durable 記録として Key decisions に置く。
-- **`ErrorKind` enum 3 variants (PermissionDenied / NotFound / Unknown) は
-  dead_code allow**: 分類自体は `classify_hresult` の pure tests で履行済み
-  だが、UI branches が存在しない = 本番 production code で使われていない。
-  `#[allow(dead_code)]` with comment を enum の内部 variant 単位で付けた
-  (enum 全体の allow ではなく)。これで `ExcelOpen` variant が production で
-  使われていることが dead_code 検知の観点から見える。将来 UI が branches を
-  増やすときに allow を 1 件ずつ外す。
-
-## KPT
-
-### Keep
-- **Tidy First を pure helper 先行で 2 commit に分割**: `parse_hresult_tag`
-  と `classify_hresult + ErrorKind` を別 commit に分けた。Sprint 23 で
-  `cf84fd8` (RED) / `9cc2c12` (GREEN) を明確に分離したのと同じ pattern を
-  踏襲。helper の pure tests が先行することで、後続の GREEN で「配線だけ」に
-  集中できた。
-- **user プロンプトではなく Sprint 24 Sprint Goal 草案を優先**: user message
-  は plan.md の paraphrase で commit 順 (PS catch 先) が逆だったが、「PS 編集
-  は stderr 内容を変えるため Tidy First の『構造のみ』を破る」という理由で
-  plan.md を優先。durable な planning doc が conversation-level な指示より
-  上位、という Sprint 24 で確立した判断を履行。
-- **Tidy-after で structural judgment を test pin に落とした**: Sprint 24
-  Sprint Goal 草案の commit 5 "substring fallback の存廃判断" は曖昧な
-  "judgment" commit になりそうだったが、`test(project): pin HRESULT path +
-  substring fallback coexistence` という明確な structural commit に実現。
-  "残す理由" が test の存在で可視化される。
-
-### Problem
-- **`#[allow(dead_code)]` の出入りが 2 commit に分散**: commit 1 で追加、
-  commit 4 で削除したが、commit 2 でも新規追加 (enum + const) した。
-  `ErrorKind` の内部 variants は結局 commit 4 でも残す形になった (UI branches
-  が無いため)。当初「commit 4 で全部外せる」想定が実態と一致しなかった。
-  Tidy First の commit 境界で `#[allow(dead_code)]` が行き来するのは
-  小さい noise。
-- **`concat!` への切替は local 判断で Planning になかった**: Sprint 24
-  Sprint Goal 草案では PS scripts の edit 方法が未定義だった。`HRESULT_CATCH`
-  共有は Sprint 25 実装中の局所判断。Planning 段階で PS script
-  synthesis 方式を 1 行 pin しておけば commit 4 の implementation surface が
-  小さくなっていた。Sprint 26+N Planning で PS-side changes を扱う場合に
-  「合成方式 (concat! / str::replace / separate scripts) の事前判断」を checklist に。
-- **日本語 locale の実機確認が未実施**: Sprint 24 design-weight で
-  「macOS で full pure-helper TDD 成立」と記録したが、それは backed
-  contract (parse + classify) の話。最終 `$_.Exception.HResult` が日本語
-  Windows で実際に期待値 (`0x80070020`) を返すかは未検証。stakeholder 環境か
-  Windows CI が整備されてから verify するしかない。Sprint 25 完了と
-  production 検証を切り離す必要。
-
-### Try
-- **PS script synthesis 方式を Planning table で pin**: PS scripts を
-  編集する Sprint の Planning で「edit 方式 (inline concat / replace /
-  separate file)」を table の 1 行に記録する。Sprint 25 の `concat!` 判断は
-  十分適切だったが、後続 planner が同じ局面で迷わないように pattern を
-  durable 化。
-- **`#[allow(dead_code)]` の出入りを commit boundary で意識的に管理**:
-  Tidy First で追加→GREEN で削除、が理想。enum variants など部分的に残る
-  ケースは variant 単位で allow を付ける (全体 allow ではなく) 慣習を継続。
-- **Windows 実機 verification を Sprint 25+N の明示タスクに**: production
-  deploy / stakeholder テスト環境で (i) 日本語 Excel で import 失敗時に
-  `VERDE_HRESULT=0x80070020` が stderr に出るか、(ii) UI が EXCEL_OPEN
-  ダイアログを出すか、を verify。出来なければ `InnerException.HResult`
-  優先ロジックの調整が必要。Sprint 25 単体では macOS で書ける範囲で
-  GREEN に到達し、実機 verify は post-Sprint follow-up に。
-
-## Follow-ups
-
-- **Windows 実機 verification**: stakeholder テスト環境で
-  (i) `VERDE_HRESULT=0x80070020` emit、(ii) UI EXCEL_OPEN ダイアログ発火 を
-  verify。失敗時は HRESULT 抽出ロジック (`InnerException.HResult` 優先) 要調整。
-- **Sprint 26 Planning (完了) / Sprint 27 実装**: Sprint 24 の (a) OS native API
-  路線 + macOS cfg-gate fallback を base に Sprint 26 で 3 OS API 経路 / TDD 戦略
-  / 5〜6 commit 分割を具体化。Sprint 27 Sprint Goal 草案 (`+8 → 65` Rust tests 予測)
-  を durable 化。Sprint 22 → 23 pattern 踏襲。詳細は Sprint 26 section 参照。
-- **`ErrorKind::PermissionDenied` / `NotFound` UI wiring**: 現在 `#[allow(dead_code)]`
-  で保護されている variants に UI branches を足す際に allow 1 件ずつ外す。
-  production で `classify_hresult` 経路が HRESULT を 3 kinds に分類する
-  利点を UX に還元する追い込み作業。rule-of-three 未到達のため rule に
-  束縛されない — product signal を待つ。
-- **substring fallback の最終削除**: Windows CI で
-  `VERDE_HRESULT=0x80070020` emit を E2E verify できるようになったら
-  substring を削除。Sprint 23 `validate_ps_arg` 削除と同じ強保証レベルに
-  到達したタイミング。
 
 # Sprint 26 (2026-04-21) — #16 lock staleness 設計具体化 + Sprint 27 Sprint Goal 草案
 
@@ -771,6 +577,81 @@ fallback を bit-perfect 維持 (behavioral 変化ゼロ)。
   `25 / 26 / 27` → `26 / 27 / 28` 更新 + Sprint 25 index demotion を同
   コミットで行うこと (本 Sprint で示した 3-sprint sliding window 手順の
   踏襲)。
+
+# Sprint 28 (2026-04-21) — Planning-only: Follow-up triage + Sprint 29 候補筆頭選定
+
+## Goal
+
+docs-only Planning Sprint (Sprint 22 / 24 / 26 と同 pattern で 4 回目)。
+Sprint 27 Follow-ups 3 件 (Windows verify / Linux container `comm` /
+long-path buffer) と Sprint 25 JP-locale verify の 4 件を、**trigger 条件
+付き候補**として plan.md に durable 記録し、いつ / どうやって Sprint 29+N
+で拾い上げるかを明示する。併せて Sprint 29 候補筆頭を 1 件選定 (着手可否
+判断は Sprint 29 時点で再評価、本 Sprint は判断材料のみ)。
+
+## 条件付き Follow-up 候補表
+
+| ID | 項目 | Trigger | Effort | 依存 | Surface 頻度 |
+|----|------|---------|--------|------|--------------|
+| F1 | Windows `QueryFullProcessImageNameW` 実機 verify (#16 post) | Windows CI 環境整備 / stakeholder 環境で image-name mismatch の false +/- 報告 | S | Sprint 27 GREEN (済) | 中 (stakeholder-report 駆動) |
+| F2 | Linux container `/proc/<pid>/comm` 挙動調査 / `/exe` 降格判断 (#16 post) | Linux container deploy 決定 / `verde-helper` 等 basename 衝突実例 3 件 | S | Sprint 27 GREEN (済) | 低 (development-time surface 待ち) |
+| F3 | Windows long-path enable 環境での `buf[260]` overflow 再検討 (#16 post) | Verde が >260 char path 配下で起動される実例 3 件 / stakeholder 報告 | XS | Sprint 27 GREEN (済) | 低 |
+| F4 | JP-locale EXCEL_OPEN E2E verify + `InnerException.HResult` 優先ロジック検証 (#17 post) | 日本語 Windows stakeholder 環境で import 失敗 E2E 可能 / CI JP-locale runner 整備 | S | Sprint 25 GREEN (済) | 中 (stakeholder-report 駆動) |
+
+## Sprint 29 候補筆頭: **F4** (JP-locale EXCEL_OPEN verify)
+
+選定根拠:
+
+- **Trigger 成立可能性**: F1 / F4 共に stakeholder-report 駆動で中頻度。
+  F4 は Sprint 25 Key decisions で `InnerException.HResult` 優先が未検証
+  durable risk として明示記録 (`.NET` `TargetInvocationException` wrap の
+  InnerException が実機 JP Excel で本物の COM HResult を露出するかは
+  macOS 上 full TDD では確認不能)。時間経過で検証 debt が増す。
+- **Effort**: S (stakeholder 実行の verify タスクが主、Verde 側は stderr
+  受信 + UI EXCEL_OPEN 発火の確認のみ)。
+- **判断材料** (Sprint 29 着手時に再評価): (a) stakeholder JP Windows
+  環境の準備状況、(b) Windows CI (JP-locale runner) の整備可能性、
+  (c) verify 失敗時の HRESULT 抽出ロジック (`InnerException` 優先 ↔
+  `Exception.HResult` 直接) 調整 surface (Sprint 25 Try 項目参照)。
+- **判断保留**: Sprint 29 を Planning Sprint として切るか直接実装に入るか
+  は着手時に再評価。本 Sprint 28 では候補筆頭を固定するのみ。trigger 未
+  成立なら product-signal 由来の別 PBI を優先。
+
+## rule-of-three cfg-gate 監視結果 (Sprint 27 継承 / 本 Sprint で確定採択)
+
+Sprint 27 Tidy-after commit (`629de6e`) message で `HRESULT cfg /
+is_pid_alive cfg / process_image_basename cfg` の 3 surface 到達を記録し、
+**共通化 skip を durable 判断**として確定済み (各 cfg 分岐は OS-specific
+に本質的に異なる API を呼ぶ — 共通 helper 抽出は cfg gymnastics を別関数
+に移動するだけで net gain ゼロ)。本 Sprint 28 でも状況変化なし。
+
+**Sprint 28 以降の cfg-gate helper 使用方針 (確定)**:
+
+- rule-of-three は「共通 surface が 3 箇所」であって「cfg 構文が 3 回」
+  ではない。cfg surface のみが 3 に達した段階では抽出しない。
+- 再評価 trigger: BSD 等 4 つ目 OS に provider を追加する PBI が surface
+  し、かつ provider 本体に OS 非依存な共通ロジック (basename 正規化・
+  PID validation など) が surface した時点で再評価。現時点で該当なし。
+
+## KPT
+
+- **Keep**: Planning-only docs Sprint (本 Sprint で 4 回目) を 1 commit
+  に閉じ込めることで sunk-cost bias と alternative 検出時の design 急ぎ
+  を回避する pattern が再履行された (Sprint 22→23 / 24→25 / 26→27 / 28→?)。
+- **Problem**: 4 候補いずれも stakeholder / CI 環境整備が trigger で、
+  planner 単独では trigger 進捗不能。Sprint 29+N のスケジュール不確実性
+  が高く、backlog に「待機案件」が累積しやすい構造。
+- **Try**: Sprint 29 着手時に F1–F4 の trigger 成立状況を backlog 再評価
+  checklist として走らせる (未成立なら product-signal 由来の別 PBI 優先)。
+
+## Follow-ups
+
+- **Sprint 29 着手時点で F4 筆頭 / F1 次点の trigger 再評価** (本 Sprint で
+  durable 固定した選定を override する新 signal が無いか確認)。
+- **preamble "Currently detailed" drift 再発防止**: Sprint 29 追加時に
+  `26 / 27 / 28` → `27 / 28 / 29` + Sprint 26 index demotion を同 commit で。
+- **rule-of-three cfg-gate 再評価 trigger**: BSD 等 4 つ目 OS provider PBI
+  が surface し、かつ共通ロジックが実体化したとき (現在 surface なし)。
 
 # Commit discipline notes
 
