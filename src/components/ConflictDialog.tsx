@@ -1,13 +1,20 @@
 import { useTranslation } from "react-i18next";
+import type { ConflictModule } from "../lib/types";
 
 interface ConflictDialogProps {
   count: number;
+  // Optional: when provided, the dialog renders a scrollable list of the
+  // conflicting module filenames below the headline message. The hook
+  // layer always has this data, but we keep it optional so older call
+  // sites that only know the count still compile.
+  modules?: ConflictModule[];
   onKeepFile: () => void;
   onKeepExcel: () => void;
 }
 
 export function ConflictDialog({
   count,
+  modules,
   onKeepFile,
   onKeepExcel,
 }: ConflictDialogProps) {
@@ -54,13 +61,37 @@ export function ConflictDialog({
 
         <p
           style={{
-            margin: "0 0 20px 0",
+            margin: "0 0 12px 0",
             fontSize: "13px",
             lineHeight: 1.5,
           }}
         >
           {t("conflict.message", { count })}
         </p>
+
+        {modules && modules.length > 0 && (
+          <ul
+            style={{
+              margin: "0 0 20px 0",
+              padding: "8px 12px",
+              maxHeight: "180px",
+              overflowY: "auto",
+              listStyle: "none",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border)",
+              borderRadius: "4px",
+              fontSize: "12px",
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            }}
+          >
+            {modules.map((m) => (
+              <li key={m.filename} style={{ padding: "2px 0" }}>
+                {m.filename}
+              </li>
+            ))}
+          </ul>
+        )}
 
         <div
           style={{
