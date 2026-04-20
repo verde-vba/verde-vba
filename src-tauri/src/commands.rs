@@ -28,9 +28,10 @@ pub async fn open_project(xlsm_path: String) -> Result<ProjectInfo, String> {
     // skip the error in that case and let acquire clean it up.
     if LockManager::is_locked(&xlsm_path) {
         if let Some(info) = LockManager::read_lock(&xlsm_path) {
-            let is_stale_same_machine = info.machine == LockManager::current_machine_name()
-                && !LockManager::is_pid_alive(info.pid);
-            if !is_stale_same_machine {
+            // Delegate stale detection to LockManager so PID-reuse TTL
+            // logic stays in one place (see lock::is_stale docs for the
+            // full branch table). Commands only decides error vs self-heal.
+            if !LockManager::is_stale(&info) {
                 return Err(format_lock_error(&info));
             }
         }
@@ -211,12 +212,15 @@ mod tests {
         std::fs::write(&tmp, b"dummy").unwrap();
         let lock_path = LockManager::lock_path(tmp.to_str().unwrap());
 
+        // Use a fresh timestamp so the 7-day TTL check (Sprint 18, PBI #3)
+        // cannot misclassify the fixture as stale once wall-clock time
+        // drifts past the previously-hardcoded date.
         let foreign = LockInfo {
             user: "alice".to_string(),
             machine: "OTHER-HOST".to_string(),
             pid: 1,
             app: "Verde".to_string(),
-            locked_at: "2026-04-19T10:30:00Z".to_string(),
+            locked_at: (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
         };
         std::fs::write(&lock_path, serde_json::to_string(&foreign).unwrap()).unwrap();
 
@@ -242,13 +246,15 @@ mod tests {
         let lock_path = LockManager::lock_path(tmp.to_str().unwrap());
 
         // Hand-write a lock that pretends to be held on a different host
-        // so the stale-same-machine fast path cannot kick in.
+        // so the stale-same-machine fast path cannot kick in. Timestamp
+        // is dynamic so the 7-day TTL in is_stale (Sprint 18, PBI #3)
+        // does not reap the fixture over time.
         let foreign = LockInfo {
             user: "alice".to_string(),
             machine: "OTHER-HOST".to_string(),
             pid: 1,
             app: "Verde".to_string(),
-            locked_at: "2026-04-19T10:30:00Z".to_string(),
+            locked_at: (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
         };
         std::fs::write(&lock_path, serde_json::to_string(&foreign).unwrap()).unwrap();
 
