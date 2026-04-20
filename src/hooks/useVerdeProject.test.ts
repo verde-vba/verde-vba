@@ -49,9 +49,13 @@ describe("useVerdeProject", () => {
       });
       await waitFor(() => expect(result.current.project).not.toBeNull());
 
-      // Act
+      // Act: syncToExcel now rethrows after recording state.error so callers
+      // observe the failure via promise rejection too. Awaiting on `rejects`
+      // keeps the rejection handled while preserving the state assertion below.
       await act(async () => {
-        await result.current.syncToExcel();
+        await expect(result.current.syncToExcel()).rejects.toThrow(
+          "project not found: abc123"
+        );
       });
 
       // Assert: stored error must be the raw backend message (no "Error: "

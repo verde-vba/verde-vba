@@ -133,6 +133,7 @@ export function useVerdeProject() {
         ...s,
         error: e instanceof Error ? e.message : String(e),
       }));
+      throw e;
     }
   }, [state.project]);
 
@@ -143,12 +144,20 @@ export function useVerdeProject() {
       // is a bug in the caller, but silently no-op'ing is safer than
       // firing a spurious COM import.
       if (!state.project || !state.conflict) return;
-      await commands.resolveConflict(
-        state.project.project_id,
-        state.project.xlsm_path,
-        side
-      );
-      setState((s) => ({ ...s, conflict: null }));
+      try {
+        await commands.resolveConflict(
+          state.project.project_id,
+          state.project.xlsm_path,
+          side
+        );
+        setState((s) => ({ ...s, conflict: null }));
+      } catch (e) {
+        setState((s) => ({
+          ...s,
+          error: e instanceof Error ? e.message : String(e),
+        }));
+        throw e;
+      }
     },
     [state.project, state.conflict]
   );
