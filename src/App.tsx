@@ -107,7 +107,7 @@ function App() {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const path = await open({
-        filters: [{ name: "Excel Macro", extensions: ["xlsm"] }],
+        filters: [{ name: t("common.fileTypeExcelMacro"), extensions: ["xlsm"] }],
       });
       if (!path) return;
       const xlsmPath = path as string;

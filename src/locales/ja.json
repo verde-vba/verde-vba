@@ -3,7 +3,8 @@
     "title": "Verde"
   },
   "common": {
-    "dismiss": "閉じる"
+    "dismiss": "閉じる",
+    "fileTypeExcelMacro": "Excel マクロ"
   },
   "menu": {
     "open": ".xlsm を開く",

@@ -3,7 +3,8 @@
     "title": "Verde"
   },
   "common": {
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "fileTypeExcelMacro": "Excel Macro"
   },
   "menu": {
     "open": "Open .xlsm",
