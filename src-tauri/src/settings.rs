@@ -128,3 +128,48 @@ impl Settings {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_without_trust_field_deserialize_to_default() {
+        // Legacy settings.json (pre-trust-field) must still load. Existing
+        // users should land on the first-launch guide (vbaAcknowledged=false)
+        // rather than crashing on an unknown-field error.
+        let legacy_json = r#"{
+            "theme": "dark",
+            "language": "en",
+            "editor": {
+                "fontSize": 14,
+                "fontFamily": "monospace",
+                "tabSize": 4,
+                "wordWrap": "off",
+                "minimap": true
+            },
+            "sync": { "autoSyncToExcel": true }
+        }"#;
+
+        let settings: Settings =
+            serde_json::from_str(legacy_json).expect("legacy JSON must deserialize");
+        assert!(!settings.trust.vba_acknowledged);
+    }
+
+    #[test]
+    fn settings_serialize_roundtrip_preserves_trust() {
+        let mut settings = Settings::default();
+        settings.trust.vba_acknowledged = true;
+
+        let serialized = serde_json::to_string(&settings).expect("serialize");
+        let restored: Settings = serde_json::from_str(&serialized).expect("deserialize");
+
+        assert!(restored.trust.vba_acknowledged);
+    }
+
+    #[test]
+    fn default_trust_vba_acknowledged_is_false() {
+        let settings = Settings::default();
+        assert!(!settings.trust.vba_acknowledged);
+    }
+}
