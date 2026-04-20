@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-import { useVerdeProject } from "./useVerdeProject";
+import { SAVE_BLOCKED_READONLY, useVerdeProject } from "./useVerdeProject";
 
 function makeProject(overrides?: Partial<ProjectInfo>): ProjectInfo {
   return {
@@ -109,6 +109,54 @@ describe("useVerdeProject", () => {
         "project not found: deadbeef00000000"
       );
       expect(result.current.conflict).not.toBeNull();
+    });
+  });
+
+  describe("SAVE_BLOCKED_READONLY sentinel contract", () => {
+    it("saveModule throws an Error whose message === SAVE_BLOCKED_READONLY when the project is open read-only, without invoking the save command", async () => {
+      // Arrange: open via openProjectReadOnly so state.readOnly flips
+      // to true. check_conflict returns empty so no conflict UI steals
+      // focus. Crucially we do NOT stub save_module here — if the
+      // short-circuit leaks, the unexpected-command reject below will
+      // fire with a different message and the assertion fails.
+      const project = makeProject();
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "open_project_readonly") return Promise.resolve(project);
+        if (cmd === "check_conflict") return Promise.resolve([]);
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      });
+
+      const { result } = renderHook(() => useVerdeProject());
+
+      await act(async () => {
+        await result.current.openProjectReadOnly(project.xlsm_path);
+      });
+      await waitFor(() => expect(result.current.readOnly).toBe(true));
+
+      const invokeCallsBeforeSave = invokeMock.mock.calls.length;
+
+      // Act + Assert: the throw must be an Error instance AND its
+      // message must be the exact sentinel string, because App.tsx
+      // matches with `e instanceof Error && e.message === SAVE_BLOCKED_READONLY`.
+      // Pinning both halves means a regression that drops the Error
+      // wrap OR drifts the string both surface as a red test.
+      await act(async () => {
+        await expect(
+          result.current.saveModule("Module1.bas", "updated content")
+        ).rejects.toThrowError(new Error(SAVE_BLOCKED_READONLY));
+      });
+
+      // And: saveModule must short-circuit *before* hitting the
+      // backend — the whole point of read-only is that no COM import
+      // fires. If the guard ever moved below the invoke, this check
+      // catches it.
+      expect(invokeMock.mock.calls.length).toBe(invokeCallsBeforeSave);
+
+      // Pin the sentinel literal itself too: a dev that changes the
+      // constant without updating App.tsx's matcher would pass the
+      // rejects.toThrowError above (since it reads from the same
+      // constant) but fail this one, nudging them to coordinate.
+      expect(SAVE_BLOCKED_READONLY).toBe("SAVE_BLOCKED_READONLY");
     });
   });
 
