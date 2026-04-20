@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import en from "../locales/en.json";
+import ja from "../locales/ja.json";
 import { parseBackendError, toI18nKey } from "./error-parse";
 
 describe("parseBackendError", () => {
@@ -118,5 +120,65 @@ describe("toI18nKey", () => {
   it("returns undefined for generic so callers fall back to the raw message", () => {
     const parsed = parseBackendError("something unexpected");
     expect(toI18nKey(parsed)).toBeUndefined();
+  });
+});
+
+describe("toI18nKey locale contract", () => {
+  // ensure every structured key returned by toI18nKey
+  // is resolvable to a .title and .message in every locale
+  // so missing-key runtime regressions surface at test time.
+  const resolve = (obj: unknown, path: string): unknown =>
+    path.split(".").reduce<unknown>((acc, k) => {
+      if (acc && typeof acc === "object" && k in acc)
+        return (acc as Record<string, unknown>)[k];
+      return undefined;
+    }, obj);
+
+  it("every locale namespace returned by toI18nKey resolves in both en and ja", () => {
+    const samples: Array<{ input: string; expectsTitleMessage: boolean }> = [
+      { input: "project not found: x", expectsTitleMessage: true },
+      {
+        input: "project metadata is corrupted: bad",
+        expectsTitleMessage: true,
+      },
+      { input: "LOCKED:u:m:t", expectsTitleMessage: true },
+      { input: "EXCEL_OPEN: busy", expectsTitleMessage: false },
+    ];
+
+    for (const { input, expectsTitleMessage } of samples) {
+      const key = toI18nKey(parseBackendError(input));
+      expect(key, `toI18nKey should be defined for input: ${input}`).toBeDefined();
+      for (const [localeName, locale] of [
+        ["en", en],
+        ["ja", ja],
+      ] as const) {
+        if (expectsTitleMessage) {
+          const title = resolve(locale, `${key}.title`);
+          const message = resolve(locale, `${key}.message`);
+          expect(
+            typeof title,
+            `${localeName}:${key}.title should be a string`,
+          ).toBe("string");
+          expect(title, `${localeName}:${key}.title should be non-empty`).not.toBe(
+            "",
+          );
+          expect(
+            typeof message,
+            `${localeName}:${key}.message should be a string`,
+          ).toBe("string");
+          expect(
+            message,
+            `${localeName}:${key}.message should be non-empty`,
+          ).not.toBe("");
+        } else {
+          const value = resolve(locale, key!);
+          expect(
+            typeof value,
+            `${localeName}:${key} should be a flat string leaf`,
+          ).toBe("string");
+          expect(value, `${localeName}:${key} should be non-empty`).not.toBe("");
+        }
+      }
+    }
   });
 });
