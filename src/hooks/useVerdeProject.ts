@@ -107,6 +107,7 @@ export function useVerdeProject() {
       if (state.readOnly) {
         throw new Error(SAVE_BLOCKED_READONLY);
       }
+      setState((s) => ({ ...s, loading: true, error: null }));
       try {
         await commands.saveModule(state.project.project_id, filename, content);
       } catch (e) {
@@ -115,6 +116,8 @@ export function useVerdeProject() {
           error: e instanceof Error ? e.message : String(e),
         }));
         throw e;
+      } finally {
+        setState((s) => ({ ...s, loading: false }));
       }
     },
     [state.project, state.readOnly]
@@ -122,6 +125,7 @@ export function useVerdeProject() {
 
   const syncToExcel = useCallback(async () => {
     if (!state.project) return;
+    setState((s) => ({ ...s, loading: true, error: null }));
     try {
       await commands.syncToExcel(state.project.project_id);
     } catch (e) {
@@ -134,6 +138,8 @@ export function useVerdeProject() {
         error: e instanceof Error ? e.message : String(e),
       }));
       throw e;
+    } finally {
+      setState((s) => ({ ...s, loading: false }));
     }
   }, [state.project]);
 
@@ -144,6 +150,7 @@ export function useVerdeProject() {
       // is a bug in the caller, but silently no-op'ing is safer than
       // firing a spurious COM import.
       if (!state.project || !state.conflict) return;
+      setState((s) => ({ ...s, loading: true, error: null }));
       try {
         await commands.resolveConflict(
           state.project.project_id,
@@ -157,6 +164,8 @@ export function useVerdeProject() {
           error: e instanceof Error ? e.message : String(e),
         }));
         throw e;
+      } finally {
+        setState((s) => ({ ...s, loading: false }));
       }
     },
     [state.project, state.conflict]
