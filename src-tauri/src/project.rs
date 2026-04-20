@@ -16,11 +16,17 @@ use crate::vba_bridge::VbaBridge;
 /// on. Anything unrecognised goes into `Unknown(i32)` so diagnostics can
 /// still surface the raw value without pretending to classify it.
 #[derive(Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum ErrorKind {
     ExcelOpen,
+    // `#[allow(dead_code)]` is temporary — PermissionDenied / NotFound /
+    // Unknown are exercised by pure classify_hresult tests but not yet
+    // branched on in production code. They'll come off the allowlist once
+    // the UI grows branches for them (planned follow-up, not Sprint 25).
+    #[allow(dead_code)]
     PermissionDenied,
+    #[allow(dead_code)]
     NotFound,
+    #[allow(dead_code)]
     Unknown(i32),
 }
 
@@ -31,7 +37,6 @@ pub(crate) enum ErrorKind {
 ///
 /// - `0x80070020` `ERROR_SHARING_VIOLATION` — file shared for delete/write
 /// - `0x80070021` `ERROR_LOCK_VIOLATION` — byte-range lock conflict
-#[allow(dead_code)]
 pub(crate) const EXCEL_OPEN_HRESULTS: &[i32] =
     &[0x80070020u32 as i32, 0x80070021u32 as i32];
 
@@ -178,10 +183,23 @@ impl ProjectManager {
         "already open",
     ];
 
-    /// Pure classification: returns `Some(msg)` if `err_msg` matches any
-    /// known "Excel holds the workbook" substring, `None` otherwise.
-    /// Extracted for direct unit testing without constructing real errors.
+    /// Pure classification: returns `true` if the captured stderr/message
+    /// indicates Excel is holding the workbook open.
+    ///
+    /// Sprint 25 / PBI #17: the HRESULT tag path runs first and is locale
+    /// -agnostic — as long as the PS catch block emitted `VERDE_HRESULT=...`
+    /// and the code lands in `EXCEL_OPEN_HRESULTS`, we win regardless of
+    /// UI language. The English-substring fallback stays in place for
+    /// error surfaces that don't (yet) ride through the catch block —
+    /// e.g. non-Windows diagnostics and any PS failure path not wrapped
+    /// in try/catch. Sprint 25 Tidy-after will revisit removal once we
+    /// have evidence that every real-world failure emits the tag.
     pub(crate) fn is_excel_open_error(err_msg: &str) -> bool {
+        if let Some(hresult) = Self::parse_hresult_tag(err_msg) {
+            if Self::classify_hresult(hresult) == ErrorKind::ExcelOpen {
+                return true;
+            }
+        }
         let lower = err_msg.to_lowercase();
         Self::EXCEL_OPEN_SUBSTRINGS
             .iter()
@@ -191,43 +209,15 @@ impl ProjectManager {
     /// Parse a `VERDE_HRESULT=0x...` (or decimal) tag line emitted by the
     /// PS script's catch block. Returns the first HRESULT value found.
     ///
-    /// Sprint 25 / PBI #17. Extracted as a *pure* helper first (Tidy First)
-    /// so classification can be driven off COM error codes rather than
-    /// locale-specific substrings. The PS side emits the tag to stderr via
+    /// Sprint 25 / PBI #17. The PS side emits the tag to stderr via
     /// `[Console]::Error.WriteLine("VERDE_HRESULT=0x{0:X8}" -f $h)`; the
-    /// Rust caller then forwards the captured stderr to this function.
+    /// Rust caller forwards the captured stderr here.
     ///
     /// Accepts both the canonical hex form (`0x80070020`) and a decimal
     /// form (`-2147024864`) so the contract stays robust against future PS
     /// formatter drift. Only the first matching line wins — PS wrappers
     /// occasionally duplicate the line, and those duplicates carry no new
     /// information.
-    ///
-    /// `#[allow(dead_code)]` is temporary: the Sprint 25 GREEN commit wires
-    /// this helper into `classify_import_error`, at which point the allow
-    /// must come off.
-    /// Map a HRESULT integer to Verde's classification enum.
-    ///
-    /// Pure function — no locale, no I/O. Intentional: keeps the Sprint 25
-    /// GREEN wiring trivial (PS emits -> parse_hresult_tag -> classify_hresult
-    /// -> branch) and makes macOS-side TDD viable without real COM.
-    ///
-    /// `#[allow(dead_code)]` parallel to `parse_hresult_tag`: both come off
-    /// in the GREEN commit.
-    #[allow(dead_code)]
-    pub(crate) fn classify_hresult(hresult: i32) -> ErrorKind {
-        if EXCEL_OPEN_HRESULTS.contains(&hresult) {
-            ErrorKind::ExcelOpen
-        } else if hresult == 0x80070005u32 as i32 {
-            ErrorKind::PermissionDenied
-        } else if hresult == 0x80030002u32 as i32 {
-            ErrorKind::NotFound
-        } else {
-            ErrorKind::Unknown(hresult)
-        }
-    }
-
-    #[allow(dead_code)]
     pub(crate) fn parse_hresult_tag(stderr: &str) -> Option<i32> {
         for line in stderr.lines() {
             let trimmed = line.trim();
@@ -244,6 +234,23 @@ impl ProjectManager {
             }
         }
         None
+    }
+
+    /// Map a HRESULT integer to Verde's classification enum.
+    ///
+    /// Pure function — no locale, no I/O. Intentional: keeps the wiring
+    /// trivial (PS emits -> parse_hresult_tag -> classify_hresult -> branch)
+    /// and makes macOS-side TDD viable without real COM.
+    pub(crate) fn classify_hresult(hresult: i32) -> ErrorKind {
+        if EXCEL_OPEN_HRESULTS.contains(&hresult) {
+            ErrorKind::ExcelOpen
+        } else if hresult == 0x80070005u32 as i32 {
+            ErrorKind::PermissionDenied
+        } else if hresult == 0x80030002u32 as i32 {
+            ErrorKind::NotFound
+        } else {
+            ErrorKind::Unknown(hresult)
+        }
     }
 
     /// Classify an import failure. Any error whose stderr/message matches a

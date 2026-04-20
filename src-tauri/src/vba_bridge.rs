@@ -16,8 +16,34 @@ use std::process::Command;
 ///
 /// Env-var naming uses the `VERDE_` prefix to avoid collisions with any
 /// env var the operator or a parent process might already have set.
+/// PS `catch` block: emit the COM HRESULT as a locale-agnostic tag on
+/// stderr so the Rust classifier can branch off the numeric code rather
+/// than localised prose. Sprint 25 / PBI #17 — see `parse_hresult_tag` +
+/// `classify_hresult` in `project.rs` for the consumer side.
+///
+/// We prefer `InnerException.HResult` when present because COM failures
+/// typically surface via a wrapping `TargetInvocationException`; falling
+/// back to `Exception.HResult` covers the direct-throw path. `throw` at
+/// the end re-raises so the process still exits non-zero — the tag is
+/// additive diagnostic output, not a swallow.
 #[cfg(windows)]
-const EXPORT_SCRIPT: &str = r#"
+const HRESULT_CATCH: &str = r#"
+} catch {
+    $h = 0
+    if ($_.Exception) {
+        if ($_.Exception.InnerException -and $_.Exception.InnerException.HResult) {
+            $h = $_.Exception.InnerException.HResult
+        } elseif ($_.Exception.HResult) {
+            $h = $_.Exception.HResult
+        }
+    }
+    [Console]::Error.WriteLine(("VERDE_HRESULT=0x{0:X8}" -f $h))
+    throw
+"#;
+
+#[cfg(windows)]
+const EXPORT_SCRIPT: &str = concat!(
+    r#"
 $xlsmPath  = $env:VERDE_XLSM_PATH
 $outputDir = $env:VERDE_OUTPUT_DIR
 $excel = New-Object -ComObject Excel.Application
@@ -41,14 +67,19 @@ try {
     }
     $wb.Close($false)
     $modules | ConvertTo-Json
+"#,
+    HRESULT_CATCH,
+    r#"
 } finally {
     $excel.Quit()
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
 }
-"#;
+"#
+);
 
 #[cfg(windows)]
-const IMPORT_SCRIPT: &str = r#"
+const IMPORT_SCRIPT: &str = concat!(
+    r#"
 $xlsmPath   = $env:VERDE_XLSM_PATH
 $moduleName = $env:VERDE_MODULE_NAME
 $modulePath = $env:VERDE_MODULE_PATH
@@ -70,11 +101,15 @@ try {
     }
     $wb.Save()
     $wb.Close($false)
+"#,
+    HRESULT_CATCH,
+    r#"
 } finally {
     $excel.Quit()
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
 }
-"#;
+"#
+);
 
 pub struct VbaBridge;
 
