@@ -56,6 +56,24 @@ impl ProjectManager {
             .join(project_id)
     }
 
+    fn meta_path(project_id: &str) -> PathBuf {
+        Self::project_dir(project_id).join(".verde-meta.json")
+    }
+
+    fn read_meta(project_id: &str) -> Result<ProjectMeta, Box<dyn std::error::Error>> {
+        let path = Self::meta_path(project_id);
+        let content = std::fs::read_to_string(&path)?;
+        let meta: ProjectMeta = serde_json::from_str(&content)?;
+        Ok(meta)
+    }
+
+    fn write_meta(project_id: &str, meta: &ProjectMeta) -> Result<(), Box<dyn std::error::Error>> {
+        let path = Self::meta_path(project_id);
+        let content = serde_json::to_string_pretty(meta)?;
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
+
     pub async fn open(&self, xlsm_path: &str) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
         let project_id = Self::project_id_from_path(xlsm_path);
         let project_dir = Self::project_dir(&project_id);
@@ -108,19 +126,15 @@ impl ProjectManager {
         project_id: &str,
     ) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
         let project_dir = Self::project_dir(project_id);
-        let meta_path = project_dir.join(".verde-meta.json");
-
-        if meta_path.exists() {
-            let content = std::fs::read_to_string(&meta_path)?;
-            let meta: ProjectMeta = serde_json::from_str(&content)?;
-            Ok(ProjectInfo {
-                project_id: meta.project_id,
-                xlsm_path: meta.xlsm_path,
-                project_dir: project_dir.to_string_lossy().to_string(),
-                modules: meta.modules.into_values().collect(),
-            })
-        } else {
-            Err("Project not found".into())
+        if !Self::meta_path(project_id).exists() {
+            return Err("Project not found".into());
         }
+        let meta = Self::read_meta(project_id)?;
+        Ok(ProjectInfo {
+            project_id: meta.project_id,
+            xlsm_path: meta.xlsm_path,
+            project_dir: project_dir.to_string_lossy().to_string(),
+            modules: meta.modules.into_values().collect(),
+        })
     }
 }
