@@ -24,6 +24,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_project,
+            open_project_readonly,
             close_project,
             force_open_project,
             save_module,

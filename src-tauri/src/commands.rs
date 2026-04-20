@@ -51,6 +51,19 @@ pub async fn close_project(xlsm_path: String) -> Result<(), String> {
 }
 
 #[command]
+pub async fn open_project_readonly(xlsm_path: String) -> Result<ProjectInfo, String> {
+    // Read-only mode deliberately bypasses the lock subsystem: we neither
+    // check nor acquire the lock. The user has already seen the LOCKED
+    // dialog and chosen "read-only", so returning a LOCKED error here
+    // would be a bug. Read-only *enforcement* happens in the frontend by
+    // disabling the save path — since save_module is what would actually
+    // mutate the xlsm via COM import, blocking it in the UI is sufficient
+    // for the MVP.
+    let manager = ProjectManager::new();
+    manager.open(&xlsm_path).await.map_err(|e| e.to_string())
+}
+
+#[command]
 pub async fn force_open_project(xlsm_path: String) -> Result<ProjectInfo, String> {
     // Force-open is the user's explicit override after seeing the LOCKED
     // dialog. Best-effort drop the existing sentinel — if release fails
@@ -156,6 +169,43 @@ mod tests {
             if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
                 return v;
             }
+        }
+    }
+
+    #[test]
+    fn open_project_readonly_bypasses_lock_check() {
+        // Same setup as the LOCKED fixture below: a foreign-host lock that
+        // open_project would reject. open_project_readonly must NOT return
+        // a LOCKED error because the whole point of read-only mode is to
+        // open without touching the lock subsystem.
+        let tmp = env::temp_dir().join(format!(
+            "verde_cmd_readonly_test_{}.xlsm",
+            std::process::id()
+        ));
+        std::fs::write(&tmp, b"dummy").unwrap();
+        let lock_path = LockManager::lock_path(tmp.to_str().unwrap());
+
+        let foreign = LockInfo {
+            user: "alice".to_string(),
+            machine: "OTHER-HOST".to_string(),
+            pid: 1,
+            app: "Verde".to_string(),
+            locked_at: "2026-04-19T10:30:00Z".to_string(),
+        };
+        std::fs::write(&lock_path, serde_json::to_string(&foreign).unwrap()).unwrap();
+
+        let result = block_on(open_project_readonly(tmp.to_str().unwrap().to_string()));
+
+        // Cleanup before asserting so a failure doesn't leak the lock.
+        let _ = std::fs::remove_file(&lock_path);
+        let _ = std::fs::remove_file(&tmp);
+
+        match result {
+            Ok(_) => {}
+            Err(e) => assert!(
+                !e.starts_with("LOCKED:"),
+                "read-only open must not surface LOCKED error, got: {e}"
+            ),
         }
     }
 
