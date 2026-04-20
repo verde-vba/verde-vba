@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // jsdom doesn't implement matchMedia; useTheme calls it synchronously on
@@ -33,6 +33,24 @@ vi.mock("@tauri-apps/api/core", () => ({
 // can bypass the real native file picker and feed a synthetic path in.
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(async () => "C:/tmp/missing.xlsm"),
+}));
+
+// Monaco doesn't render meaningfully under jsdom and registers Ctrl+S as an
+// internal editor action rather than a DOM keydown listener, so driving the
+// real save path from a test would require booting Monaco. Replace the
+// Editor with a minimal stub that exposes onSave via a plain button — the
+// Ctrl+S keybinding is covered by Editor's own tests, and what we care
+// about here is App's catch-site routing of the resulting backend error.
+vi.mock("./components/Editor", () => ({
+  Editor: ({ onSave }: { onSave?: (content: string) => void }) => (
+    <button
+      type="button"
+      data-testid="test-save-trigger"
+      onClick={() => onSave?.("dummy content")}
+    >
+      test-save
+    </button>
+  ),
 }));
 
 import App from "./App";
@@ -147,5 +165,65 @@ describe("App error banner", () => {
       expect(invokeMock).toHaveBeenCalledWith("force_open_project", expect.anything());
     });
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("App save blocked", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it("renders the localized excelOpen body when save_module rejects with EXCEL_OPEN", async () => {
+    // Phase 2B replaced a hardcoded English sentence with t("status.excelOpen").
+    // The invariant under test: when save_module rejects with the EXCEL_OPEN:
+    // prefix, the excelOpenPrompt banner must render the localized en.json
+    // value — not the old literal "Cannot save while Excel has the workbook
+    // open." — and its dismiss control must carry t("common.dismiss").
+    const projectResponse = {
+      project_id: "abc1234567890def",
+      xlsm_path: "C:/tmp/missing.xlsm",
+      project_dir: "C:/verde/projects/abc1234567890def",
+      modules: [
+        { filename: "Module1.bas", module_type: 1, line_count: 0, hash: "h" },
+      ],
+    };
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(defaultSettingsResponse);
+      if (cmd === "open_project") return Promise.resolve(projectResponse);
+      // checkConflict is called inside the open flow; resolve empty so it
+      // doesn't accidentally surface a ConflictDialog that steals focus.
+      if (cmd === "check_conflict") return Promise.resolve([]);
+      if (cmd === "save_module") {
+        return Promise.reject(new Error("EXCEL_OPEN: workbook is open"));
+      }
+      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open .xlsm" }));
+
+    // Wait for the project to open — the stub Editor above renders once
+    // activeModule is set, which is the signal the open flow finished.
+    const saveButton = await screen.findByTestId("test-save-trigger");
+    fireEvent.click(saveButton);
+
+    // Banner renders with role="alert" for both warning and error tones; the
+    // EXCEL_OPEN path is the only banner surface active here so a single
+    // findByRole is unambiguous. Asserting on the full body text proves the
+    // t("status.excelOpen") wiring landed in Phase 2B, and the explicit
+    // not-matcher pins the old hardcoded string as a regression sentinel.
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(
+      "Excel has this workbook open. Close Excel and try saving again."
+    );
+    expect(banner).not.toHaveTextContent(
+      "Cannot save while Excel has the workbook open."
+    );
+    // common.dismiss wiring: the Banner's dismiss button must carry the
+    // en.json label, not the old hardcoded "Dismiss" literal — scope the
+    // lookup to the banner so we don't accidentally match some other button.
+    expect(
+      within(banner).getByRole("button", { name: "Dismiss" })
+    ).toBeInTheDocument();
   });
 });
