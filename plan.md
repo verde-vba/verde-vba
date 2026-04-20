@@ -799,3 +799,152 @@ so the assertion is redundant dead weight rather than a guard.
   rule-of-three accumulation (`withLoadingState`). Sprint 12 will
   likely need fresh input from the sweep or a new PBI rather than
   another follow-up pickup.
+
+# Sprint 12 — Backlog refinement only, candidates enumerated for future sprints
+
+## Goal
+
+Sprints 7 / 10 / 11 closed the "type-system bypass" arc. All four
+remaining Sprint 11 follow-ups are external-input-gated (product
+decisions, telemetry evidence, rule-of-three accumulation). This
+sprint is a pure refinement pass: enumerate non-bypass Tidy
+candidates surfaced by a fresh `src/**` sweep, rank them by
+priority and readiness, and explicitly decline to execute any —
+each candidate either lacks a decisive rule-of-three signal, falls
+below the "cosmetic vs load-bearing" threshold, or exceeds a single
+sprint's safe scope.
+
+## Scope
+
+- **Sole item**: `src/**` spot-check with `rg` for dead code,
+  duplicated structure, inconsistent naming, long functions,
+  residual debug logs, and stale TODO markers — excluding the
+  already-closed type-system bypass theme.
+- Record the top-three candidates below with explicit "why not
+  now" notes.
+- **No code changes**, **no sprint tag** — pure backlog hygiene
+  commit so Sprint 13 planning starts from a refreshed candidate
+  pool rather than a cold re-probe.
+
+## Sweep findings (spot-check, not exhaustive)
+
+Probes executed:
+- `rg "TODO|FIXME|HACK|XXX|console\.(log|debug|info)"` across
+  `src/**/*.{ts,tsx}`
+- File-size ordering (`wc -l`) to surface long-function suspects
+- `rg "export (function|const|class|interface|type)"` for
+  dead-export / unused-symbol suspects
+- Targeted read of `App.tsx:145-216` (handler cluster) and
+  `src/components/ConflictDialog.tsx:11-19` (prop surface)
+
+Residuals observed:
+- `App.tsx:120` — `console.log("File dialog not available outside Tauri")`
+  dev-mode fallback. Already cataloged in Sprint 5 sweep as
+  non-i18n / non-user-visible. **Not a Tidy**: intentional
+  dev-only signal, removing it would regress local-dev
+  discoverability.
+- `App.tsx:155`, `App.tsx:211` — two `// TODO` markers. Both flag
+  genuine future work (Verde docs URL, ConflictDialog wiring for
+  content conflicts). **Not stale**: TODO removal would lose
+  load-bearing context.
+
+## Sprint 12 candidate catalogue (priority-ranked, not scheduled)
+
+### Candidate A (Small, Low priority) — `handleKeepFile` / `"verde"` naming asymmetry
+
+- **Where**: `App.tsx:163-169`, `ConflictDialog.tsx:11-19`.
+- **Shape**: the dialog prop is `onKeepFile`, the App callback is
+  `handleKeepFile`, but the underlying `resolveConflict("verde")`
+  arg uses the "verde" metaphor. Two vocabularies — "file"
+  (user-facing: "the version in my file") and "verde" (internal:
+  "the verde-side cache") — coexist without an explicit mapping.
+- **Why not now**: the App↔Dialog naming pair IS self-consistent
+  (both sides use `File`/`Excel`); the "verde" vs "file" gap lives
+  one layer deeper at the hook boundary and is load-bearing there
+  (the hook needs to distinguish verde-side vs excel-side state,
+  not user-file-side). A rename would need a product decision on
+  which vocabulary is canonical — that is external input, not a
+  mechanical Tidy. Defer until a UX / docs pass clarifies the
+  canonical label.
+
+### Candidate B (Small, Low priority) — `openModules` filename-filter helper extraction
+
+- **Where**: `App.tsx:174` (`openModules.find((m) => m.filename === mod.filename)`)
+  and `App.tsx:185-187`
+  (`openModules.filter((m) => m.filename !== mod.filename)`).
+- **Shape**: two uses of the same "match module by filename"
+  predicate. A `byFilename(mod)` or `sameFilename(a,b)` helper
+  would collapse both to a single named predicate.
+- **Why not now**: rule-of-two, not three. Sprint 4 explicitly
+  retired a similar `withLoadingState` helper candidate at two
+  uses and required rule-of-three evidence before reviving it.
+  Same discipline applies: extract once a third call site appears
+  (e.g. a future "focus-next-tab-by-filename" handler), not before.
+
+### Candidate C (Medium, Medium priority) — `App.tsx` (352 LOC) responsibility split
+
+- **Where**: `src/App.tsx` as a whole.
+- **Shape**: the file fuses three clusters — error routing
+  (`routeParsedError`, `handleCaughtBackendError`), open-flow
+  handlers (`handleOpenFile`, `handleForceOpen`,
+  `handleOpenReadOnly`), and UI render (JSX tree with seven
+  component children). Extraction candidates: a `useErrorRouting`
+  hook returning `{ errorBanner, saveBlockedPrompt,
+  excelOpenPrompt, routeParsedError, handleCaughtBackendError,
+  clearBanners }`, or a `handlers.ts` module for the open-flow
+  trio.
+- **Why not now**: two reasons. (1) The extraction boundary is
+  not obvious — `handleCaughtBackendError` reads `setLockPrompt`
+  (open-flow state) AND `routeParsedError` (error-routing state),
+  so the hook extraction forces a choice between "passing
+  setLockPrompt in" (leaky) or "co-locating lock state with
+  error state" (drift risk). (2) The test suite's
+  characterization coverage (32 tests) is indexed against the
+  current module layout; a split demands either test-helper
+  refactoring or temporary coverage gaps. Neither is a single-
+  sprint safe move. Revisit when either (a) a new feature forces
+  the boundary (e.g. a second error-routing consumer), or (b) a
+  dedicated restructure PBI gets planned with explicit test-
+  refactor scope.
+
+## Decision
+
+**Sprint 12 is refinement-only.** No code change, no sprint tag.
+Sprint 13 planning should re-examine the candidate catalogue
+above against any new context (product feedback, new PBI, test
+coverage changes) before spending execution budget.
+
+## Acceptance criteria (verified)
+
+- `bun run test` — still green (unchanged: **32** tests across 5 files)
+- `bun run tsc --noEmit` — still clean (exit 0; untouched)
+- `cargo` — untouched (no Rust changes in Sprint 12)
+
+## Key decisions
+
+- **Backlog refinement is a legitimate sprint outcome**: forcing
+  an execution when the candidate pool is all "cosmetic / too
+  large / rule-of-two" burns trust in the prioritization process.
+  A clean refinement commit lands less code than an execution
+  commit but leaves Sprint 13 with a warm catalogue instead of a
+  cold re-probe.
+- **No sprint tag without behavior change**: tags mark
+  executable milestones (for bisect / revert). A refinement-only
+  sprint has nothing to bisect to; the docs commit hash itself is
+  the reference point.
+- **Explicit "why not now" per candidate**: enumerating without
+  justifying defers decisions to a future planner who has less
+  context than today. The three "why not now" notes encode the
+  priority ordering in a durable form so Sprint 13 doesn't need
+  to re-derive them.
+- **Rule-of-three discipline honored on Candidate B**: same gate
+  Sprint 4 applied to `withLoadingState`. Consistency is itself a
+  form of backlog hygiene — if candidate B is scheduled at two
+  uses, the `withLoadingState` deferral loses credibility.
+
+## Follow-ups (out of Sprint 12 scope)
+
+- All four Sprint 11 follow-ups remain unchanged (external-input-
+  gated).
+- Sprint 12 candidates A/B/C above are now part of the residual
+  backlog with their "why not now" rationale attached.
