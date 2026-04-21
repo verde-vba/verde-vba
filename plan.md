@@ -815,6 +815,96 @@ WASM load 失敗 = editor エラー bar 表示 (現状 Sprint 3 で確立した
   外部 artifact 追加 Sprint 34 以降) で `just fetch-artifacts` 統合を再評価。
   Sprint 31 の単発 `just fetch-wasm` で rule-of-two までに留める。
 
+## Sprint 31.B-31.G Execution Retrospective (2026-04-21)
+
+Planning commit (31.A) で durable 化した 31.A-31.H 実装分割を、
+treesitter-vba `v0.1.0` tag 発行 (gate 成立) を確認後、本セッション内で
+連続履行。31.B-31.G を 4 commits + 1 docs commit (本節) で完了:
+
+| Commit  | Sprint | 内容                                                           |
+|---------|--------|----------------------------------------------------------------|
+| `d91d49f` | 31.B   | Monarch grammar の characterization test pin (Tidy First)       |
+| `6ccd6cb` | 31.C   | `web-tree-sitter` 依存追加 + load skeleton                       |
+| `85b61c6` | 31.D-gate | treesitter-vba v0.1.0 gate cleared (docs)                    |
+| `95cbcb1` | 31.D   | `just fetch-wasm` recipe + CI step + `.gitignore` 追加          |
+| `74ae58f` | 31.E   | RED: real-WASM 駆動 semantic-tokens 期待値 (5 tests, all FAIL) |
+| `de907ea` | 31.F   | GREEN: `provideDocumentSemanticTokens` 実装 + Editor 配線         |
+| `604fe56` | 31.G   | Tidy after: Monarch grammar + fallback 削除 (-139 lines)        |
+| (本 docs) | 31.H   | 本 retrospective                                                |
+
+### Probe / DoD 結果 (本 commit 直前)
+
+- Backend: `cargo test --lib` → 64 passed (Sprint 30 と同値、今 Sprint
+  Rust コード変更ゼロ)
+- Backend: `cargo clippy --lib -- -D warnings` → 0 warnings
+- Frontend: `bun run test` → **82 passed (13 files)**
+  - Sprint 30 baseline 63 → 31.B で +6 (monaco-vba 6) → 31.C で +14
+    (tree-sitter-vba 14) → 31.E で +5 (semantic 5) → 31.F で 0 (test
+    削除なし) → 31.G で -6 (Monarch 削除に伴う 6 件削除) = 82 ✓
+- Frontend: `bun run tsc --noEmit` → 0 errors
+- Frontend: `bun run lint` → 0 warnings
+
+### KPT (執行フェーズ)
+
+- **Keep**: gate 待ち想定だった 31.D-31.H が **同一セッション内で連続履行
+  可能**だったのは、Sprint 31 Planning で artifact 取得方針を `(b) 段階分割`
+  に確定していたから。Planning commit が gate 成立後の execute 経路を予め
+  durable 化していたことで「待ちか進むか」の判断コストがゼロだった。
+- **Keep**: Sprint 31.E の RED test を `tree-sitter-vba.semantic.test.ts`
+  という別ファイルに分離した判断。31.C の skeleton 単体テスト
+  (`tree-sitter-vba.test.ts`) と integration test の関心を分けたことで、
+  31.G で Monarch を削除する際にどのテストを残し / どれを消すかの判断が
+  ファイル境界で済んだ。
+- **Problem**: jsdom の `globalThis.Uint8Array` が Node の `Buffer` と
+  prototype 不一致で `Language.load(buffer)` が `instanceof Uint8Array`
+  分岐を取り損ねた。`new Uint8Array(buf.buffer, buf.byteOffset,
+  buf.byteLength)` で wrap して回避。本知見は web-tree-sitter v0.26 +
+  vitest+jsdom の組合わせ固有。upstream で改善されれば不要になる workaround。
+- **Problem**: tree-sitter-vba grammar が `(identifier)` 等の named node
+  に **leading whitespace** を含む場合がある (`Sub Foo()` の "Foo" が
+  cols 3-7 で text " Foo")。`trimmedExtent` helper で trim する mapping
+  処理を追加して対応 (再発防止のため `tree-sitter-vba.semantic.test.ts`
+  の "trims leading whitespace" テストで invariant 化済み)。
+- **Try (Sprint 32 へ)**: 上記 jsdom Uint8Array workaround は同一 pattern
+  が verde-lsp WASM (もし WASM 配信になる) や他の WASM artifact 統合時にも
+  再発しうる。`src/lib/wasm-loader.ts` のような共通ヘルパー化を検討
+  (rule-of-two: tree-sitter-vba が現在唯一の WASM、verde-lsp は binary
+  予定なので rule-of-three 未到達)。Sprint 32+ で第 2 の WASM 出現時に再評価。
+- **Try (Sprint 32 へ)**: `provideDocumentSemanticTokens` の per-call parse
+  はキャッシュなし。10000+ 行の large module で重複 parse コストが
+  目立つかをパフォーマンス計測 PBI として Sprint 32 の F4 trigger 候補に登録。
+
+### Key decisions reaffirm (durable; Sprint 32+ での蒸し返し禁止)
+
+- **Sprint 31.G の Monarch 完全削除は durable**: 31.G 実装後にユーザから
+  「Monarch を残しておけば...」の signal が来た場合、Sprint 30 D3
+  (grammar 単一 truth source) を提示し却下根拠とする。Sprint 31 中盤の
+  fallback 経路 (31.C-31.F の中間状態) を permanent 化しない判断は予定
+  どおり履行された。
+- **Sprint 31.D `just fetch-wasm` は単独 recipe で維持**: 共通化
+  (`just fetch-artifacts`) は rule-of-three 到達 (Sprint 34 以降) で再評価。
+- **Editor.tsx → App.tsx の `onTreeSitterLoadError` callback 経路** (本
+  Sprint で新規追加) は、将来 LSP load 失敗にも同 pattern を踏襲する候補。
+  Sprint 32 で verde-lsp 配線時に `onLspLoadError` を別 prop で追加するか、
+  両者を `onGrammarServiceError({ kind: "tree-sitter" | "lsp" })` に
+  統合するかは Sprint 32 で判断 (rule-of-two)。
+
+### Updated Follow-ups (Sprint 32 Planning で消化)
+
+- **(消化済)** `[Due: Sprint 31 実装進捗 checkpoint]` 31.B-31.C 着手 →
+  本 Sprint 内で履行 (commits `d91d49f`, `6ccd6cb`)
+- **(消化済)** `[Due: treesitter-vba v0.1.0 tag 発行後]` 31.D-31.H 実装 →
+  本 Sprint 内で履行 (commits `95cbcb1`, `74ae58f`, `de907ea`, 本 docs)
+- **`[Due: Sprint 32 Planning]` 大規模ファイルの semantic-tokens 性能計測
+  PBI 登録**: 上記 Try より転記。F4 trigger 候補として Sprint 32 Probes で
+  re-evaluation。
+- **`[Due: 第 2 WASM artifact 追加時]` jsdom `Uint8Array` workaround の
+  共通ヘルパー化**: 上記 Try より転記。rule-of-two 維持、第 2 出現時に判断。
+- **`[Due: Sprint 32 Planning, 不変]` preamble "Currently detailed" drift
+  防止**: `29 / 30 / 31` → `30 / 31 / 32` 更新 + Sprint 29 index demotion。
+- **`[Due: Sprint 32 verde-lsp 配線時]` `onTreeSitterLoadError` /
+  `onLspLoadError` 統合判断**: 上記 Key decisions の延長。
+
 # Commit discipline notes
 
 Sprint retrospective の Try 項目のうち、**standing convention** に格上げされた
