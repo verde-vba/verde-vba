@@ -25,6 +25,13 @@ export async function closeProject(xlsmPath: string): Promise<void> {
   return invoke("close_project", { xlsmPath });
 }
 
+export async function readModule(
+  projectId: string,
+  filename: string
+): Promise<string> {
+  return invoke<string>("read_module", { projectId, filename });
+}
+
 export async function saveModule(
   projectId: string,
   filename: string,

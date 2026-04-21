@@ -46,6 +46,7 @@ pub fn run(initial_file: Option<String>) {
             open_project_readonly,
             close_project,
             force_open_project,
+            read_module,
             save_module,
             sync_to_excel,
             sync_from_excel,

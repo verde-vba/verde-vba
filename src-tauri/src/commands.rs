@@ -81,6 +81,11 @@ pub async fn force_open_project(xlsm_path: String) -> Result<ProjectInfo, String
 }
 
 #[command]
+pub async fn read_module(project_id: String, filename: String) -> Result<String, String> {
+    ProjectManager::read_module(&project_id, &filename).map_err(|e| e.to_string())
+}
+
+#[command]
 pub async fn save_module(request: ModuleSaveRequest) -> Result<(), String> {
     let manager = ProjectManager::new();
     manager

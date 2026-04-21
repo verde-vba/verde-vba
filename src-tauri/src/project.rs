@@ -454,6 +454,22 @@ impl ProjectManager {
         Self::export_and_init(&project_id, xlsm_path, &project_dir).await
     }
 
+    /// Read a single module's source content from the project directory.
+    /// Returns the file content as a String, handling Shift-JIS gracefully
+    /// via `from_utf8_lossy` (same strategy as `export_and_init`).
+    pub fn read_module(
+        project_id: &str,
+        filename: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let project_dir = Self::project_dir(project_id);
+        let path = project_dir.join(filename);
+        if !path.exists() {
+            return Err(format!("module not found: {filename}").into());
+        }
+        let bytes = std::fs::read(&path)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
     pub async fn get_info(
         &self,
         project_id: &str,

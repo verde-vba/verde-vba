@@ -10,7 +10,7 @@ import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
-import { getInitialFile } from "./lib/tauri-commands";
+import { getInitialFile, readModule } from "./lib/tauri-commands";
 import { useErrorRouting } from "./hooks/useErrorRouting";
 import { useModuleTabs } from "./hooks/useModuleTabs";
 import { useOpenFile } from "./hooks/useOpenFile";
@@ -71,6 +71,25 @@ function App() {
     xlsmPath: project?.xlsm_path ?? null,
   });
   const [editorContent, setEditorContent] = useState("");
+
+  // Load module content from disk when the active module changes.
+  useEffect(() => {
+    if (!project || !activeModule) {
+      setEditorContent("");
+      return;
+    }
+    let cancelled = false;
+    readModule(project.project_id, activeModule.filename).then(
+      (content) => {
+        if (!cancelled) setEditorContent(content);
+      },
+      (err) => {
+        console.error("Failed to read module:", err);
+        if (!cancelled) setEditorContent("");
+      }
+    );
+    return () => { cancelled = true; };
+  }, [project, activeModule]);
 
   // Auto-open the file passed via CLI (right-click "Open with Verde").
   // get_initial_file uses take() on the Rust side, so re-runs are harmless.
