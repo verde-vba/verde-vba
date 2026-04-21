@@ -224,25 +224,29 @@ export function createVbaSemanticTokensProvider(
 ): languages.DocumentSemanticTokensProvider {
   // Lazy init so the factory remains callable with placeholder Languages
   // (used by Sprint 31.C's getLegend unit test). Parser/Query construction
-  // happens on the first provideDocumentSemanticTokens call.
-  let parser: Parser | null = null;
-  let query: Query | null = null;
-  function ensureInit() {
-    if (parser && query) return;
-    parser = new Parser();
+  // happens on the first provideDocumentSemanticTokens call. Returning the
+  // cached pair (instead of mutating outer nullable bindings) keeps type
+  // narrowing intact at the call site — Sprint 15 bypass-arc invariant
+  // (`!\.` → 0 hits) holds without non-null assertions.
+  let cached: { parser: Parser; query: Query } | null = null;
+  function getParserAndQuery(): { parser: Parser; query: Query } {
+    if (cached) return cached;
+    const parser = new Parser();
     parser.setLanguage(language);
-    query = new Query(language, HIGHLIGHTS_QUERY);
+    const query = new Query(language, HIGHLIGHTS_QUERY);
+    cached = { parser, query };
+    return cached;
   }
 
   return {
     getLegend: () => vbaSemanticTokensLegend,
     provideDocumentSemanticTokens: (model) => {
-      ensureInit();
+      const { parser, query } = getParserAndQuery();
       const source = model.getValue();
-      const tree = parser!.parse(source);
+      const tree = parser.parse(source);
       if (!tree) return null;
       try {
-        const captures = query!.captures(tree.rootNode);
+        const captures = query.captures(tree.rootNode);
         const data = encodeCapturesAsSemanticTokens(captures);
         return { data };
       } finally {
