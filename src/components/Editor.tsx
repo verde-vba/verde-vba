@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { editor } from "monaco-editor";
 import { useTranslation } from "react-i18next";
 import { registerVbaLanguage, VBA_LANGUAGE_ID } from "../lib/monaco-vba";
+import { registerTreeSitterVbaProvider } from "../lib/tree-sitter-vba";
 
 interface EditorProps {
   filename: string;
@@ -34,6 +35,10 @@ export function Editor({
 
   const handleBeforeMount = useCallback((monaco: typeof import("monaco-editor")) => {
     registerVbaLanguage(monaco);
+    // Async — Monarch tokenization remains active until WASM load resolves;
+    // Sprint 31.G will remove the Monarch fallback once tree-sitter is the
+    // single source of truth.
+    void registerTreeSitterVbaProvider(monaco, VBA_LANGUAGE_ID);
   }, []);
 
   const handleMount = useCallback(

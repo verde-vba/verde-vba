@@ -106,22 +106,13 @@ describe("shouldFallbackToMonarch (Sprint 31.C fallback decision)", () => {
   });
 });
 
-describe("createVbaSemanticTokensProvider (Sprint 31.C skeleton)", () => {
-  it("returns a provider whose legend matches vbaSemanticTokensLegend", () => {
+describe("createVbaSemanticTokensProvider (factory contract)", () => {
+  it("returns a provider whose legend matches vbaSemanticTokensLegend (no Parser/Query touched)", () => {
+    // Lazy-init contract: factory must accept a placeholder Language and
+    // expose getLegend without instantiating a Parser. Real-language
+    // integration (provideDocumentSemanticTokens) is covered in
+    // tree-sitter-vba.semantic.test.ts.
     const provider = createVbaSemanticTokensProvider({} as Language);
     expect(provider.getLegend()).toEqual(vbaSemanticTokensLegend);
-  });
-
-  it("returns null from provideDocumentSemanticTokens (Sprint 31.F will implement real mapping)", () => {
-    const provider = createVbaSemanticTokensProvider({} as Language);
-    const tokens = provider.provideDocumentSemanticTokens(
-      // Minimal stub — the skeleton ignores args
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {} as any,
-      null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {} as any
-    );
-    expect(tokens).toBeNull();
   });
 });
