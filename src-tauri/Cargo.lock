@@ -4582,6 +4582,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "encoding_rs",
  "hex",
  "libc",
  "log",

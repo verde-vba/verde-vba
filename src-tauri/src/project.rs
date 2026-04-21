@@ -4,6 +4,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::conflict::{detect_conflicts, ConflictModule};
+
+/// Decode bytes exported by Excel COM into a UTF-8 String.
+///
+/// Fast path: if the bytes are valid UTF-8, return them as-is (zero-copy
+/// check). Fallback: decode as Shift-JIS (CP932), which is what
+/// `VBComponent.Export()` produces on Japanese-locale Windows. This
+/// replaces the previous `String::from_utf8_lossy` strategy that turned
+/// every non-ASCII Japanese character into `U+FFFD`.
+fn decode_vba_bytes(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    let (cow, _, _) = encoding_rs::SHIFT_JIS.decode(bytes);
+    cow.into_owned()
+}
 use crate::settings::Settings;
 use crate::vba_bridge::VbaBridge;
 
@@ -141,11 +156,8 @@ impl ProjectManager {
         let mut modules = HashMap::new();
         for filename in &filenames {
             let path = project_dir.join(filename);
-            // Use read + from_utf8_lossy (not read_to_string) to match
-            // hash_files_in_dir. VBA COM exports on Japanese Windows
-            // produce Shift-JIS files that are not valid UTF-8.
             let bytes = std::fs::read(&path)?;
-            let content = String::from_utf8_lossy(&bytes);
+            let content = decode_vba_bytes(&bytes);
             let hash = Self::content_hash(&content);
             let line_count = content.lines().count();
             let module_type = Self::module_type_from_extension(filename);
@@ -434,7 +446,7 @@ impl ProjectManager {
             // Refresh meta hash from the on-disk bytes we just imported so a
             // subsequent conflict check sees the workbook as in sync.
             let bytes = std::fs::read(entry.path())?;
-            let content = String::from_utf8_lossy(&bytes).into_owned();
+            let content = decode_vba_bytes(&bytes);
             Self::update_module_hash(project_id, &name, &content)?;
         }
 
@@ -455,8 +467,8 @@ impl ProjectManager {
     }
 
     /// Read a single module's source content from the project directory.
-    /// Returns the file content as a String, handling Shift-JIS gracefully
-    /// via `from_utf8_lossy` (same strategy as `export_and_init`).
+    /// Returns the file content as a UTF-8 String, decoding Shift-JIS
+    /// when necessary (same strategy as `export_and_init`).
     pub fn read_module(
         project_id: &str,
         filename: &str,
@@ -467,7 +479,7 @@ impl ProjectManager {
             return Err(format!("module not found: {filename}").into());
         }
         let bytes = std::fs::read(&path)?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        Ok(decode_vba_bytes(&bytes))
     }
 
     pub async fn get_info(
@@ -508,7 +520,7 @@ impl ProjectManager {
                 continue;
             }
             let bytes = std::fs::read(entry.path())?;
-            let content = String::from_utf8_lossy(&bytes);
+            let content = decode_vba_bytes(&bytes);
             out.insert(name, Self::content_hash(&content));
         }
         Ok(out)
@@ -600,7 +612,7 @@ impl ProjectManager {
                         .await
                         .map_err(Self::classify_import_error)?;
                     let bytes = std::fs::read(entry.path())?;
-                    let content = String::from_utf8_lossy(&bytes).into_owned();
+                    let content = decode_vba_bytes(&bytes);
                     Self::update_module_hash(project_id, &name, &content)?;
                 }
                 Ok(())
@@ -616,7 +628,7 @@ impl ProjectManager {
                         continue;
                     }
                     let bytes = std::fs::read(&path)?;
-                    let content = String::from_utf8_lossy(&bytes).into_owned();
+                    let content = decode_vba_bytes(&bytes);
                     Self::update_module_hash(project_id, &filename, &content)?;
                 }
                 Ok(())
