@@ -30,6 +30,11 @@ result
 # `just fetch-wasm`; release-cycle-independent — never commit).
 public/tree-sitter-vba.wasm
 
+# verde-lsp sidecar binaries (fetched from verde-lsp GitHub Releases via
+# `just fetch-lsp` in Sprint 32.E; release-cycle-independent — never commit).
+# `.gitkeep` sentinel preserves the directory itself.
+src-tauri/binaries/verde-lsp*
+
 
 # Added by cargo
 

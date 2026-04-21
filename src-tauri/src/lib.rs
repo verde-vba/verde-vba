@@ -2,11 +2,13 @@ pub mod cli;
 mod commands;
 pub mod conflict;
 mod lock;
+mod lsp_sidecar;
 mod project;
 mod settings;
 mod vba_bridge;
 
 use commands::*;
+use lsp_sidecar::lsp_send;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -37,6 +39,7 @@ pub fn run() {
             resolve_conflict,
             get_settings,
             save_settings,
+            lsp_send,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
