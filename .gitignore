@@ -45,3 +45,6 @@ src-tauri/binaries/verde-lsp*
 /Cargo.toml
 /Cargo.lock
 /src/main.rs
+
+.claude/settings.local.json
+.claude/worktree/
