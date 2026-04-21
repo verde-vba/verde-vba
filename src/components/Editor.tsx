@@ -136,6 +136,7 @@ export function Editor({
           renderLineHighlight: "all",
           fontFamily: "'Cascadia Code', 'Consolas', monospace",
           fontLigatures: true,
+          "semanticHighlighting.enabled": true,
         }}
       />
     </div>
