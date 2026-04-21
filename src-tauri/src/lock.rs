@@ -181,6 +181,7 @@ impl LockManager {
     /// commit 5.
     #[cfg(windows)]
     pub(crate) fn process_image_basename(pid: u32) -> Option<String> {
+        use windows::core::PWSTR;
         use windows::Win32::System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
             PROCESS_QUERY_LIMITED_INFORMATION,
@@ -189,7 +190,7 @@ impl LockManager {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
             let mut buf = [0u16; 260];
             let mut len = buf.len() as u32;
-            let result = QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), &mut buf, &mut len);
+            let result = QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), PWSTR(buf.as_mut_ptr()), &mut len);
             let _ = windows::Win32::Foundation::CloseHandle(handle);
             result.ok()?;
             let full = String::from_utf16_lossy(&buf[..len as usize]);

@@ -27,7 +27,9 @@ use std::process::Command;
 /// the end re-raises so the process still exits non-zero — the tag is
 /// additive diagnostic output, not a swallow.
 #[cfg(windows)]
-const HRESULT_CATCH: &str = r#"
+macro_rules! hresult_catch {
+    () => {
+        r#"
 } catch {
     $h = 0
     if ($_.Exception) {
@@ -39,7 +41,9 @@ const HRESULT_CATCH: &str = r#"
     }
     [Console]::Error.WriteLine(("VERDE_HRESULT=0x{0:X8}" -f $h))
     throw
-"#;
+"#
+    };
+}
 
 #[cfg(windows)]
 const EXPORT_SCRIPT: &str = concat!(
@@ -68,7 +72,7 @@ try {
     $wb.Close($false)
     $modules | ConvertTo-Json
 "#,
-    HRESULT_CATCH,
+    hresult_catch!(),
     r#"
 } finally {
     $excel.Quit()
@@ -102,7 +106,7 @@ try {
     $wb.Save()
     $wb.Close($false)
 "#,
-    HRESULT_CATCH,
+    hresult_catch!(),
     r#"
 } finally {
     $excel.Quit()
