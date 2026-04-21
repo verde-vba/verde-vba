@@ -33,6 +33,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # Fetch verde-lsp sidecar binary (release-cycle independent; mirrors
+      # the tree-sitter-vba.wasm pattern in the frontend job below).
+      # `externalBin` in tauri.conf.json forces this to exist before any
+      # cargo invocation — tauri-build validates it at build script time.
+      # Sprint 32.E decision: macOS skips x86_64 (Apple Silicon only).
+      - name: Fetch verde-lsp sidecar binary
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p src-tauri/binaries
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  asset="verde-lsp-linux";       triple="x86_64-unknown-linux-gnu"; ext="" ;;
+            macos-latest)   asset="verde-lsp-macos";       triple="aarch64-apple-darwin";     ext="" ;;
+            windows-latest) asset="verde-lsp-windows.exe"; triple="x86_64-pc-windows-msvc";   ext=".exe" ;;
+            *) echo "Unsupported runner ${{ matrix.os }}" >&2; exit 1 ;;
+          esac
+          dest="src-tauri/binaries/verde-lsp-${triple}${ext}"
+          curl -fsSL -o "$dest" "https://github.com/verde-vba/verde-lsp/releases/download/v0.1.0/$asset"
+          chmod +x "$dest"
       - run: cargo test --lib
       - run: cargo clippy --lib -- -D warnings
       - run: cargo fmt --check
