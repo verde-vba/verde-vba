@@ -78,6 +78,10 @@
       "title": "プロジェクトメタデータが壊れています",
       "message": ".verde-meta.json ファイルは存在しますが、解析できませんでした。手動編集の確認、またはバックアップからの復元を検討してください。"
     },
-    "treeSitterWasmMissing": "VBA 文法ファイル (tree-sitter-vba.wasm) を読み込めませんでした。`just fetch-wasm` を実行して再読み込みしてください。"
+    "treeSitterWasmMissing": "VBA 文法ファイル (tree-sitter-vba.wasm) を読み込めませんでした。`just fetch-wasm` を実行して再読み込みしてください。",
+    "lspNotSpawned": "言語サーバー (verde-lsp) のバイナリが見つかりません。`just fetch-lsp` を実行して再読み込みしてください。",
+    "lspSpawnFailed": "言語サーバー (verde-lsp) を起動できませんでした。バイナリに実行権限があるか確認して再読み込みしてください。",
+    "lspExited": "言語サーバー (verde-lsp) が予期せず終了しました。再読み込みするまで VBA 補完機能は利用できません。",
+    "lspInitializeFailed": "言語サーバー (verde-lsp) が初期化を拒否しました。VBA 補完機能は利用できません。"
   }
 }

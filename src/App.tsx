@@ -128,6 +128,20 @@ function App() {
                       message: t("errors.treeSitterWasmMissing"),
                     })
                   }
+                  onLspLoadError={(reason) => {
+                    // Each reason maps to a distinct remediation string.
+                    // Keeping the switch here (rather than in the hook)
+                    // keeps `useLspClient` transport-pure.
+                    const key =
+                      reason === "not-spawned"
+                        ? "errors.lspNotSpawned"
+                        : reason === "spawn-failed"
+                          ? "errors.lspSpawnFailed"
+                          : reason === "exit"
+                            ? "errors.lspExited"
+                            : "errors.lspInitializeFailed";
+                    setErrorBanner({ kind: "generic", message: t(key) });
+                  }}
                 />
               ) : (
                 <WelcomeScreen onOpenFile={handleOpenFile} />

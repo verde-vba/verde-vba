@@ -8,7 +8,7 @@ mod settings;
 mod vba_bridge;
 
 use commands::*;
-use lsp_sidecar::lsp_send;
+use lsp_sidecar::{lsp_send, lsp_spawn, LspSidecarState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .manage(LspSidecarState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -39,6 +40,7 @@ pub fn run() {
             resolve_conflict,
             get_settings,
             save_settings,
+            lsp_spawn,
             lsp_send,
         ])
         .run(tauri::generate_context!())

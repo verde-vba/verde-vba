@@ -78,6 +78,10 @@
       "title": "Project metadata is corrupted",
       "message": "The .verde-meta.json file exists but could not be parsed. Check the file for manual edits or restore from backup."
     },
-    "treeSitterWasmMissing": "VBA grammar (tree-sitter-vba.wasm) is missing or failed to load. Run `just fetch-wasm` and reload."
+    "treeSitterWasmMissing": "VBA grammar (tree-sitter-vba.wasm) is missing or failed to load. Run `just fetch-wasm` and reload.",
+    "lspNotSpawned": "Language server (verde-lsp) binary is missing. Run `just fetch-lsp` and reload.",
+    "lspSpawnFailed": "Language server (verde-lsp) failed to start. Check that the binary is executable and reload.",
+    "lspExited": "Language server (verde-lsp) exited unexpectedly. VBA intelligence is unavailable until you reload.",
+    "lspInitializeFailed": "Language server (verde-lsp) rejected initialization. VBA intelligence is unavailable."
   }
 }

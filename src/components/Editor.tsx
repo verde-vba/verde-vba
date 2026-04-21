@@ -1,9 +1,13 @@
 import MonacoEditor from "@monaco-editor/react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { editor } from "monaco-editor";
 import { useTranslation } from "react-i18next";
 import { registerVbaLanguage, VBA_LANGUAGE_ID } from "../lib/monaco-vba";
 import { registerTreeSitterVbaProvider } from "../lib/tree-sitter-vba";
+import { createTauriLspTransport } from "../lib/lsp-bridge";
+import { useLspClient, type LspClientLoadError } from "../hooks/useLspClient";
 
 interface EditorProps {
   filename: string;
@@ -19,6 +23,11 @@ interface EditorProps {
   // Sprint 31.G: surfaced when tree-sitter-vba.wasm fails to load. Host
   // (App.tsx) is expected to render a Banner with the localized message.
   onTreeSitterLoadError?: (reason: "init-failed" | "wasm-load-failed") => void;
+  // Sprint 32.G: surfaced when the verde-lsp sidecar fails to spawn,
+  // exits, or rejects the initialize handshake. Kept as a separate prop
+  // from `onTreeSitterLoadError` per Sprint 31 Execute 2 / 32 Planning
+  // durable decision — each artifact has a distinct remediation message.
+  onLspLoadError?: (reason: LspClientLoadError) => void;
 }
 
 export function Editor({
@@ -33,9 +42,28 @@ export function Editor({
   onSave,
   onChange,
   onTreeSitterLoadError,
+  onLspLoadError,
 }: EditorProps) {
   const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+
+  // Memoize transport + spawn so the useLspClient effect does not
+  // re-run on every render (each render would otherwise unmount/remount
+  // the LSP handshake). Stable identity matches the lazy-construction
+  // contract characterized by lsp-bridge.test.ts.
+  const lspTransport = useMemo(
+    () => createTauriLspTransport({ invoke, listen }),
+    [],
+  );
+  const lspSpawn = useMemo(
+    () => () => invoke<void>("lsp_spawn"),
+    [],
+  );
+  useLspClient({
+    transport: lspTransport,
+    spawn: lspSpawn,
+    onError: onLspLoadError,
+  });
 
   const handleBeforeMount = useCallback(
     (monaco: typeof import("monaco-editor")) => {
