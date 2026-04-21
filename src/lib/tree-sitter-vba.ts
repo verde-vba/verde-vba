@@ -64,9 +64,9 @@ export async function loadTreeSitterVbaLanguage(
   }
 }
 
-export function shouldFallbackToMonarch(result: TreeSitterLoadResult): boolean {
-  return !result.ok;
-}
+// Sprint 31.G: shouldFallbackToMonarch was removed. tree-sitter is now the
+// single source of truth for VBA tokenization; load failure surfaces as a
+// user-visible error banner rather than a silent Monarch fallback.
 
 // Highlights query — focused subset of treesitter-vba/queries/highlights.scm,
 // constrained to the seven Monaco token types declared by `vbaSemanticTokensLegend`.
@@ -199,17 +199,22 @@ export function encodeCapturesAsSemanticTokens(
 }
 
 // Editor wiring: load the WASM, then register the semantic-tokens provider
-// against `languageId`. Returns the load result so callers can decide whether
-// to fall back to Monarch (Sprint 31.G removes that fallback).
+// against `languageId`. On failure, calls `onError` so the host UI can
+// surface a banner / retry hint (e.g. "run `just fetch-wasm`").
 export async function registerTreeSitterVbaProvider(
   monaco: typeof import("monaco-editor"),
   languageId: string,
-  wasmUrl: string = TREE_SITTER_VBA_WASM_URL
+  options: {
+    wasmUrl?: string;
+    onError?: (result: Extract<TreeSitterLoadResult, { ok: false }>) => void;
+  } = {}
 ): Promise<TreeSitterLoadResult> {
-  const result = await loadTreeSitterVbaLanguage(wasmUrl);
+  const result = await loadTreeSitterVbaLanguage(options.wasmUrl);
   if (result.ok) {
     const provider = createVbaSemanticTokensProvider(result.language);
     monaco.languages.registerDocumentSemanticTokensProvider(languageId, provider);
+  } else {
+    options.onError?.(result);
   }
   return result;
 }

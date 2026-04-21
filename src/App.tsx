@@ -122,6 +122,12 @@ function App() {
                   theme={resolved}
                   onSave={handleSave}
                   onChange={setEditorContent}
+                  onTreeSitterLoadError={() =>
+                    setErrorBanner({
+                      kind: "generic",
+                      message: t("errors.treeSitterWasmMissing"),
+                    })
+                  }
                 />
               ) : (
                 <WelcomeScreen onOpenFile={handleOpenFile} />

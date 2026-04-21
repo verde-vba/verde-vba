@@ -77,6 +77,7 @@
     "projectMetadataCorrupted": {
       "title": "Project metadata is corrupted",
       "message": "The .verde-meta.json file exists but could not be parsed. Check the file for manual edits or restore from backup."
-    }
+    },
+    "treeSitterWasmMissing": "VBA grammar (tree-sitter-vba.wasm) is missing or failed to load. Run `just fetch-wasm` and reload."
   }
 }

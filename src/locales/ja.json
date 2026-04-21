@@ -77,6 +77,7 @@
     "projectMetadataCorrupted": {
       "title": "プロジェクトメタデータが壊れています",
       "message": ".verde-meta.json ファイルは存在しますが、解析できませんでした。手動編集の確認、またはバックアップからの復元を検討してください。"
-    }
+    },
+    "treeSitterWasmMissing": "VBA 文法ファイル (tree-sitter-vba.wasm) を読み込めませんでした。`just fetch-wasm` を実行して再読み込みしてください。"
   }
 }

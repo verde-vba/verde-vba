@@ -16,6 +16,9 @@ interface EditorProps {
   readOnly?: boolean;
   onSave?: (content: string) => void;
   onChange?: (content: string) => void;
+  // Sprint 31.G: surfaced when tree-sitter-vba.wasm fails to load. Host
+  // (App.tsx) is expected to render a Banner with the localized message.
+  onTreeSitterLoadError?: (reason: "init-failed" | "wasm-load-failed") => void;
 }
 
 export function Editor({
@@ -29,17 +32,23 @@ export function Editor({
   readOnly = false,
   onSave,
   onChange,
+  onTreeSitterLoadError,
 }: EditorProps) {
   const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
-  const handleBeforeMount = useCallback((monaco: typeof import("monaco-editor")) => {
-    registerVbaLanguage(monaco);
-    // Async — Monarch tokenization remains active until WASM load resolves;
-    // Sprint 31.G will remove the Monarch fallback once tree-sitter is the
-    // single source of truth.
-    void registerTreeSitterVbaProvider(monaco, VBA_LANGUAGE_ID);
-  }, []);
+  const handleBeforeMount = useCallback(
+    (monaco: typeof import("monaco-editor")) => {
+      registerVbaLanguage(monaco);
+      // tree-sitter is the single tokenization source (Sprint 31.G).
+      // On load failure, the host receives an error so it can render
+      // a Banner directing the user to run `just fetch-wasm`.
+      void registerTreeSitterVbaProvider(monaco, VBA_LANGUAGE_ID, {
+        onError: (result) => onTreeSitterLoadError?.(result.reason),
+      });
+    },
+    [onTreeSitterLoadError]
+  );
 
   const handleMount = useCallback(
     (editor: editor.IStandaloneCodeEditor) => {

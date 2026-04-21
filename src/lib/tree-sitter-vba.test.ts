@@ -5,7 +5,6 @@ import {
   VBA_SEMANTIC_TOKEN_TYPES,
   createVbaSemanticTokensProvider,
   loadTreeSitterVbaLanguage,
-  shouldFallbackToMonarch,
   vbaSemanticTokensLegend,
 } from "./tree-sitter-vba";
 
@@ -85,24 +84,6 @@ describe("loadTreeSitterVbaLanguage (Sprint 31.C load-stub behavior)", () => {
       load: loadFn,
     });
     expect(loadFn).toHaveBeenCalledWith("/custom.wasm");
-  });
-});
-
-describe("shouldFallbackToMonarch (Sprint 31.C fallback decision)", () => {
-  it("returns true when the load result is a failure", () => {
-    expect(
-      shouldFallbackToMonarch({
-        ok: false,
-        reason: "wasm-load-failed",
-        error: new Error("x"),
-      })
-    ).toBe(true);
-  });
-
-  it("returns false when the load succeeded", () => {
-    expect(
-      shouldFallbackToMonarch({ ok: true, language: {} as Language })
-    ).toBe(false);
   });
 });
 
