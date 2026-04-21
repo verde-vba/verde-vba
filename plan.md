@@ -813,7 +813,7 @@ docs Sprint pattern を **8 回目**として踏襲。
 
 | Repo | Version/Tag | Commit | Status | 役割 |
 |------|-------------|--------|--------|------|
-| verde-lsp | v0.X.Y | — | **pending** (semver tag 未発行、GitHub Releases 空 `gh release list --repo verde-vba/verde-lsp` 結果; 内部 sprint tag sprint-9..54 は release cycle と独立運用) — Sprint 32.E gate 条件 | LSP sidecar binary (`verde-lsp-windows.exe` / `verde-lsp-linux` / `verde-lsp-macos` per verde-lsp `.github/workflows/release.yml`) |
+| verde-lsp | v0.1.0 | 7c1dc93 | **released** (2026-04-21 08:28Z) — Sprint 32.E gate cleared; 3 assets attached (`verde-lsp-linux` 6.5MB / `verde-lsp-macos` 5.6MB / `verde-lsp-windows.exe` 4.9MB per verde-lsp `.github/workflows/release.yml`); local `git fetch --tags ../verde-lsp` が stale だった初期 Probes 2 の "未発行" 判定は GitHub 側 publishedAt と `curl -I` で overridden | LSP sidecar binary |
 | treesitter-vba | v0.1.0 | 5541daf | released (Sprint 31.D で配信開始、本 Sprint 32 では no-op 状態) | Grammar WASM (`tree-sitter-vba.wasm`) |
 
 Sprint 31 で新規採用した External dependencies table format を本 Sprint で
