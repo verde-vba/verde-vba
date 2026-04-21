@@ -742,7 +742,7 @@ WASM load 失敗 = editor エラー bar 表示 (現状 Sprint 3 で確立した
 
 | Repo | Version/Tag | Commit | Status | 役割 |
 |------|-------------|--------|--------|------|
-| treesitter-vba | v0.1.0 (予定) | (未発行) | **pending** — Sprint 31.D の gate | Grammar WASM (`tree-sitter-vba.wasm`) |
+| treesitter-vba | v0.1.0 | 5541daf | **released** (2026-04-21) — Sprint 31.D gate 成立; Release asset `tree-sitter-vba.wasm` attached via `release.yml` (run 24704457625). 0.26 locals-runner OOM により `tree-sitter test` smoke step は release pipeline から除去 (ci.yml 側は regression detector として残置、0.27 upgrade 時の re-enable signal) | Grammar WASM (`tree-sitter-vba.wasm`) |
 | verde-lsp | (Sprint 32 以降) | — | not-yet-required | LSP sidecar binary |
 
 ## KPT
