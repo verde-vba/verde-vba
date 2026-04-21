@@ -27,7 +27,11 @@ interface EditorProps {
   // exits, or rejects the initialize handshake. Kept as a separate prop
   // from `onTreeSitterLoadError` per Sprint 31 Execute 2 / 32 Planning
   // durable decision — each artifact has a distinct remediation message.
-  onLspLoadError?: (reason: LspClientLoadError) => void;
+  onLspLoadError?: (reason: LspClientLoadError, detail?: string) => void;
+  /// Absolute filesystem path to the project directory in AppData. Passed
+  /// as `rootUri` in the LSP initialize request so verde-lsp can find VBA
+  /// source files.
+  projectDir?: string;
 }
 
 export function Editor({
@@ -43,6 +47,7 @@ export function Editor({
   onChange,
   onTreeSitterLoadError,
   onLspLoadError,
+  projectDir,
 }: EditorProps) {
   const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -63,6 +68,7 @@ export function Editor({
     transport: lspTransport,
     spawn: lspSpawn,
     onError: onLspLoadError,
+    projectDir,
   });
 
   const handleBeforeMount = useCallback(

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Banner } from "./components/Banner";
 import { ConflictDialog } from "./components/ConflictDialog";
@@ -10,6 +10,7 @@ import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { getInitialFile } from "./lib/tauri-commands";
 import { useErrorRouting } from "./hooks/useErrorRouting";
 import { useModuleTabs } from "./hooks/useModuleTabs";
 import { useOpenFile } from "./hooks/useOpenFile";
@@ -71,6 +72,18 @@ function App() {
   });
   const [editorContent, setEditorContent] = useState("");
 
+  // Auto-open the file passed via CLI (right-click "Open with Verde").
+  // get_initial_file uses take() on the Rust side, so re-runs are harmless.
+  useEffect(() => {
+    getInitialFile().then((path) => {
+      if (path) {
+        openProject(path).catch((e) => {
+          handleCaughtBackendError(e, path);
+        });
+      }
+    });
+  }, [openProject, handleCaughtBackendError]);
+
   const handleTrustClose = useCallback(() => {
     void acknowledgeTrust();
   }, [acknowledgeTrust]);
@@ -120,6 +133,7 @@ function App() {
                   filename={activeModule.filename}
                   content={editorContent}
                   theme={resolved}
+                  projectDir={project?.project_dir}
                   onSave={handleSave}
                   onChange={setEditorContent}
                   onTreeSitterLoadError={() =>
@@ -128,7 +142,7 @@ function App() {
                       message: t("errors.treeSitterWasmMissing"),
                     })
                   }
-                  onLspLoadError={(reason) => {
+                  onLspLoadError={(reason, detail) => {
                     // Each reason maps to a distinct remediation string.
                     // Keeping the switch here (rather than in the hook)
                     // keeps `useLspClient` transport-pure.
@@ -140,7 +154,8 @@ function App() {
                           : reason === "exit"
                             ? "errors.lspExited"
                             : "errors.lspInitializeFailed";
-                    setErrorBanner({ kind: "generic", message: t(key) });
+                    const msg = detail ? `${t(key)} (${detail})` : t(key);
+                    setErrorBanner({ kind: "generic", message: msg });
                   }}
                 />
               ) : (
