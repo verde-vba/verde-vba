@@ -26,6 +26,10 @@ result
 # Local env
 *.local
 
+# Tree-sitter WASM artifact (fetched from treesitter-vba GitHub Releases via
+# `just fetch-wasm`; release-cycle-independent — never commit).
+public/tree-sitter-vba.wasm
+
 
 # Added by cargo
 

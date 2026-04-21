@@ -46,5 +46,11 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - name: Fetch tree-sitter-vba.wasm
+        run: |
+          mkdir -p public
+          curl -fsSL \
+            -o public/tree-sitter-vba.wasm \
+            "https://github.com/verde-vba/treesitter-vba/releases/download/v0.1.0/tree-sitter-vba.wasm"
       - run: bun run tsc --noEmit
       - run: bun run test
