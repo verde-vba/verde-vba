@@ -12,8 +12,8 @@ fn main() {
             let tail: Vec<String> = argv.into_iter().skip(1).collect();
             verde_lib::cli::run_serve(&tail);
         }
-        Ok(CliCommand::Gui) => {
-            verde_lib::run();
+        Ok(CliCommand::Gui { initial_file }) => {
+            verde_lib::run(initial_file);
         }
         Err(msg) => {
             eprintln!("verde: {msg}");

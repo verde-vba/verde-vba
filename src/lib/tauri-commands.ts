@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ConflictModule, ProjectInfo, Settings } from "./types";
 
+export async function getInitialFile(): Promise<string | null> {
+  return invoke<string | null>("get_initial_file");
+}
+
 export async function openProject(xlsmPath: string): Promise<ProjectInfo> {
   return invoke<ProjectInfo>("open_project", { xlsmPath });
 }

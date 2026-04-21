@@ -36,7 +36,10 @@ pub const MCP_SERVER_SCRIPT: &str = "mcp/server.js";
 #[derive(Debug, PartialEq, Eq)]
 pub enum CliCommand {
     /// Default mode: launch the desktop GUI.
-    Gui,
+    ///
+    /// `initial_file` is set when the OS passes a file path as a positional
+    /// argument (e.g. right-click "Open with Verde" on an `.xlsm` file).
+    Gui { initial_file: Option<String> },
     /// Start the MCP server for the given `.xlsm` project.
     Serve { project: String },
 }
@@ -94,7 +97,7 @@ pub fn parse_args(args: &[String]) -> Result<CliCommand, String> {
     argv.extend(args.iter().cloned());
 
     match Cli::try_parse_from(&argv) {
-        Ok(Cli { command: None }) => Ok(CliCommand::Gui),
+        Ok(Cli { command: None }) => Ok(CliCommand::Gui { initial_file: None }),
         Ok(Cli {
             command: Some(CliSubcommand::Serve(ServeArgs { project })),
         }) => Ok(CliCommand::Serve { project }),
@@ -113,7 +116,15 @@ fn classify_parse_error(args: &[String], err: clap::Error) -> Result<CliCommand,
     if first_is_serve {
         Err(format_serve_error(err))
     } else {
-        Ok(CliCommand::Gui)
+        // If a single positional argument was passed (not a flag), treat it
+        // as the file the OS wants us to open. This is the right-click
+        // "Open with Verde" path: the NSIS installer registers
+        //   `verde.exe "%1"` which passes the .xlsm path as argv[1].
+        let initial_file = args
+            .first()
+            .filter(|a| !a.starts_with('-'))
+            .cloned();
+        Ok(CliCommand::Gui { initial_file })
     }
 }
 
@@ -174,7 +185,7 @@ where
 pub fn run_serve(args: &[String]) -> ! {
     match parse_args_with_subcommand(args) {
         Ok(CliCommand::Serve { project }) => exec_serve(&project),
-        Ok(CliCommand::Gui) => {
+        Ok(CliCommand::Gui { .. }) => {
             eprintln!("Usage: verde serve --project <xlsm-path>");
             exit(2);
         }
@@ -280,13 +291,32 @@ mod tests {
     #[test]
     fn parse_args_no_subcommand_launches_gui() {
         let args: Vec<String> = Vec::new();
-        assert_eq!(parse_args(&args).unwrap(), CliCommand::Gui);
+        assert_eq!(
+            parse_args(&args).unwrap(),
+            CliCommand::Gui { initial_file: None }
+        );
     }
 
     #[test]
     fn parse_args_unknown_subcommand_falls_back_to_gui() {
         let args = v(&["--not-a-command"]);
-        assert_eq!(parse_args(&args).unwrap(), CliCommand::Gui);
+        assert_eq!(
+            parse_args(&args).unwrap(),
+            CliCommand::Gui { initial_file: None }
+        );
+    }
+
+    #[test]
+    fn parse_args_file_path_opens_gui_with_initial_file() {
+        // Right-click "Open with Verde" passes the xlsm path as the sole
+        // positional argument: `verde.exe "C:\work\sales.xlsm"`.
+        let args = v(&["C:\\work\\sales.xlsm"]);
+        assert_eq!(
+            parse_args(&args).unwrap(),
+            CliCommand::Gui {
+                initial_file: Some("C:\\work\\sales.xlsm".to_string()),
+            }
+        );
     }
 
     #[test]

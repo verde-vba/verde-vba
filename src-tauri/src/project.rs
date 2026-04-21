@@ -116,21 +116,100 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// Infer `VBComponent.Type` from the file extension produced by the
+    /// export script. The mapping mirrors the PS `switch ($comp.Type)` in
+    /// `EXPORT_SCRIPT` — lossy for type 100 (Document → `.cls`), but
+    /// sufficient for the editor's module-type icon/badge.
+    fn module_type_from_extension(filename: &str) -> u32 {
+        match Path::new(filename).extension().and_then(|e| e.to_str()) {
+            Some("bas") => 1,
+            Some("cls") => 2,
+            Some("frm") => 3,
+            _ => 1,
+        }
+    }
+
+    /// Export VBA modules from Excel into the project directory and write
+    /// `.verde-meta.json`. Shared by first-open and sync-from-Excel flows.
+    async fn export_and_init(
+        project_id: &str,
+        xlsm_path: &str,
+        project_dir: &Path,
+    ) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
+        let filenames = VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
+
+        let mut modules = HashMap::new();
+        for filename in &filenames {
+            let path = project_dir.join(filename);
+            // Use read + from_utf8_lossy (not read_to_string) to match
+            // hash_files_in_dir. VBA COM exports on Japanese Windows
+            // produce Shift-JIS files that are not valid UTF-8.
+            let bytes = std::fs::read(&path)?;
+            let content = String::from_utf8_lossy(&bytes);
+            let hash = Self::content_hash(&content);
+            let line_count = content.lines().count();
+            let module_type = Self::module_type_from_extension(filename);
+            modules.insert(
+                filename.clone(),
+                ModuleInfo {
+                    filename: filename.clone(),
+                    module_type,
+                    line_count,
+                    hash,
+                },
+            );
+        }
+
+        let meta = ProjectMeta {
+            xlsm_path: xlsm_path.to_string(),
+            project_id: project_id.to_string(),
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            modules: modules.clone(),
+        };
+        Self::write_meta(project_id, &meta)?;
+
+        Ok(ProjectInfo {
+            project_id: project_id.to_string(),
+            xlsm_path: xlsm_path.to_string(),
+            project_dir: project_dir.to_string_lossy().to_string(),
+            modules: modules.into_values().collect(),
+        })
+    }
+
     pub async fn open(&self, xlsm_path: &str) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
         let project_id = Self::project_id_from_path(xlsm_path);
         let project_dir = Self::project_dir(&project_id);
         std::fs::create_dir_all(&project_dir)?;
 
-        // TODO: COM経由でVBAコードをエクスポート（Windows only）
-        // TODO: workbook-context.json を生成
-        // TODO: verde-lsp プロセスを起動
+        if Self::meta_path(&project_id).exists() {
+            // Re-open: return existing modules without re-exporting.
+            // Conflict detection (check_conflict) handles divergence.
+            let meta = Self::read_meta(&project_id)?;
+            return Ok(ProjectInfo {
+                project_id: meta.project_id,
+                xlsm_path: meta.xlsm_path,
+                project_dir: project_dir.to_string_lossy().to_string(),
+                modules: meta.modules.into_values().collect(),
+            });
+        }
 
-        Ok(ProjectInfo {
-            project_id,
-            xlsm_path: xlsm_path.to_string(),
-            project_dir: project_dir.to_string_lossy().to_string(),
-            modules: Vec::new(),
-        })
+        // First open: export from Excel and create meta. If the export
+        // fails (non-Windows, Excel not installed, corrupted workbook),
+        // fall back to an empty project so the open flow isn't blocked.
+        match Self::export_and_init(&project_id, xlsm_path, &project_dir).await {
+            Ok(info) => Ok(info),
+            Err(e) => {
+                log::warn!(
+                    "Excel export failed on first open, continuing with empty project: {e}"
+                );
+                Ok(ProjectInfo {
+                    project_id,
+                    xlsm_path: xlsm_path.to_string(),
+                    project_dir: project_dir.to_string_lossy().to_string(),
+                    modules: Vec::new(),
+                })
+            }
+        }
     }
 
     /// SHA256 of a module's source content, matching the `hash` field in
@@ -366,7 +445,13 @@ impl ProjectManager {
         &self,
         xlsm_path: &str,
     ) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
-        self.open(xlsm_path).await
+        let project_id = Self::project_id_from_path(xlsm_path);
+        let project_dir = Self::project_dir(&project_id);
+        std::fs::create_dir_all(&project_dir)?;
+
+        // Always re-export: the user explicitly asked to pull from Excel,
+        // so we overwrite AppData files and refresh meta unconditionally.
+        Self::export_and_init(&project_id, xlsm_path, &project_dir).await
     }
 
     pub async fn get_info(

@@ -528,7 +528,7 @@ mod tests {
             .chain(std::iter::once(0))
             .collect();
         let attrs = unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) };
-        assert_ne!(attrs, INVALID_FILE_ATTRIBUTES.0);
+        assert_ne!(attrs, INVALID_FILE_ATTRIBUTES);
         assert_ne!(attrs & FILE_ATTRIBUTE_HIDDEN.0, 0, "hidden bit must be set");
         assert_ne!(attrs & FILE_ATTRIBUTE_SYSTEM.0, 0, "system bit must be set");
 
