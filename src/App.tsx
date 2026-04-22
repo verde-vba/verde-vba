@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Banner } from "./components/Banner";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { Editor } from "./components/Editor";
+import { Loader } from "./components/Loader";
 import { LockDialog } from "./components/LockDialog";
 import { ReadOnlyBar } from "./components/ReadOnlyBar";
 import { Sidebar } from "./components/Sidebar";
@@ -71,21 +72,30 @@ function App() {
     xlsmPath: project?.xlsm_path ?? null,
   });
   const [editorContent, setEditorContent] = useState("");
+  const [moduleLoading, setModuleLoading] = useState(false);
 
   // Load module content from disk when the active module changes.
   useEffect(() => {
     if (!project || !activeModule) {
       setEditorContent("");
+      setModuleLoading(false);
       return;
     }
     let cancelled = false;
+    setModuleLoading(true);
     readModule(project.project_id, activeModule.filename).then(
       (content) => {
-        if (!cancelled) setEditorContent(content);
+        if (!cancelled) {
+          setEditorContent(content);
+          setModuleLoading(false);
+        }
       },
       (err) => {
         console.error("Failed to read module:", err);
-        if (!cancelled) setEditorContent("");
+        if (!cancelled) {
+          setEditorContent("");
+          setModuleLoading(false);
+        }
       }
     );
     return () => { cancelled = true; };
@@ -116,12 +126,31 @@ function App() {
     void acknowledgeTrust();
   }, [acknowledgeTrust]);
 
-  const handleKeepFile = useCallback(() => {
-    void resolveConflict("verde");
+  const [conflictResolving, setConflictResolving] = useState(false);
+  const [conflictError, setConflictError] = useState<string | null>(null);
+
+  const handleKeepFile = useCallback(async () => {
+    setConflictResolving(true);
+    setConflictError(null);
+    try {
+      await resolveConflict("verde");
+    } catch (e) {
+      setConflictError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConflictResolving(false);
+    }
   }, [resolveConflict]);
 
-  const handleKeepExcel = useCallback(() => {
-    void resolveConflict("excel");
+  const handleKeepExcel = useCallback(async () => {
+    setConflictResolving(true);
+    setConflictError(null);
+    try {
+      await resolveConflict("excel");
+    } catch (e) {
+      setConflictError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConflictResolving(false);
+    }
   }, [resolveConflict]);
 
   return (
@@ -148,6 +177,8 @@ function App() {
                 onCloseModule={handleCloseModule}
               />
               {activeModule ? (
+                <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+                {moduleLoading && <Loader />}
                 <Editor
                   filename={activeModule.filename}
                   content={editorContent}
@@ -177,6 +208,7 @@ function App() {
                     setErrorBanner({ kind: "generic", message: msg });
                   }}
                 />
+                </div>
               ) : (
                 <WelcomeScreen onOpenFile={handleOpenFile} />
               )}
@@ -258,6 +290,9 @@ function App() {
       {conflict != null && (
         <ConflictDialog
           count={conflict.modules.length}
+          modules={conflict.modules}
+          resolving={conflictResolving}
+          error={conflictError}
           onKeepFile={handleKeepFile}
           onKeepExcel={handleKeepExcel}
         />

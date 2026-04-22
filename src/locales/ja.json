@@ -48,7 +48,8 @@
     "welcome": "AI ネイティブ VBA 開発環境",
     "openPrompt": ".xlsm ファイルを開いて始めましょう",
     "rightClickTip": "ヒント: .xlsm ファイルを右クリック → Verde で開く",
-    "saveAction": "保存"
+    "saveAction": "保存",
+    "loading": "読み込み中…"
   },
   "outline": {
     "title": "アウトライン"

@@ -3,11 +3,9 @@ import type { ConflictModule } from "../lib/types";
 
 interface ConflictDialogProps {
   count: number;
-  // Optional: when provided, the dialog renders a scrollable list of the
-  // conflicting module filenames below the headline message. The hook
-  // layer always has this data, but we keep it optional so older call
-  // sites that only know the count still compile.
   modules?: ConflictModule[];
+  resolving?: boolean;
+  error?: string | null;
   onKeepFile: () => void;
   onKeepExcel: () => void;
 }
@@ -15,6 +13,8 @@ interface ConflictDialogProps {
 export function ConflictDialog({
   count,
   modules,
+  resolving,
+  error,
   onKeepFile,
   onKeepExcel,
 }: ConflictDialogProps) {
@@ -93,6 +93,23 @@ export function ConflictDialog({
           </ul>
         )}
 
+        {error && (
+          <p
+            style={{
+              margin: "0 0 12px 0",
+              padding: "8px 12px",
+              fontSize: "12px",
+              lineHeight: 1.5,
+              color: "var(--error)",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--error)",
+              borderRadius: "4px",
+            }}
+          >
+            {error}
+          </p>
+        )}
+
         <div
           style={{
             display: "flex",
@@ -103,6 +120,7 @@ export function ConflictDialog({
           <button
             type="button"
             onClick={onKeepExcel}
+            disabled={resolving}
             style={{
               padding: "6px 14px",
               background: "transparent",
@@ -110,7 +128,8 @@ export function ConflictDialog({
               border: "1px solid var(--border)",
               borderRadius: "4px",
               fontSize: "13px",
-              cursor: "pointer",
+              cursor: resolving ? "wait" : "pointer",
+              opacity: resolving ? 0.5 : 1,
             }}
           >
             {t("conflict.keepExcel")}
@@ -118,6 +137,7 @@ export function ConflictDialog({
           <button
             type="button"
             onClick={onKeepFile}
+            disabled={resolving}
             style={{
               padding: "6px 14px",
               background: "var(--accent)",
@@ -125,7 +145,8 @@ export function ConflictDialog({
               border: "1px solid var(--accent)",
               borderRadius: "4px",
               fontSize: "13px",
-              cursor: "pointer",
+              cursor: resolving ? "wait" : "pointer",
+              opacity: resolving ? 0.5 : 1,
             }}
           >
             {t("conflict.keepFile")}

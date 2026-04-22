@@ -48,7 +48,8 @@
     "welcome": "AI-native VBA development environment",
     "openPrompt": "Open .xlsm file to get started",
     "rightClickTip": "Tip: Right-click any .xlsm file → Open with Verde",
-    "saveAction": "Save"
+    "saveAction": "Save",
+    "loading": "Loading…"
   },
   "outline": {
     "title": "Outline"

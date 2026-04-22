@@ -76,3 +76,7 @@ button {
 button:hover {
   opacity: 0.8;
 }
+
+@keyframes verde-spin {
+  to { transform: rotate(360deg); }
+}
