@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ModuleInfo } from "../lib/types";
 
 interface UseModuleTabsOptions {
@@ -8,6 +8,17 @@ interface UseModuleTabsOptions {
 
 export function useModuleTabs({ activeModule, setActiveModule }: UseModuleTabsOptions) {
   const [openModules, setOpenModules] = useState<ModuleInfo[]>([]);
+
+  // Ensure the active module always has a corresponding tab.
+  // This covers the case where useVerdeProject sets activeModule
+  // on project open without going through handleSelectModule.
+  useEffect(() => {
+    if (activeModule) {
+      setOpenModules((prev) =>
+        prev.find((m) => m.filename === activeModule.filename) ? prev : [...prev, activeModule]
+      );
+    }
+  }, [activeModule]);
 
   const handleSelectModule = useCallback(
     (mod: ModuleInfo) => {
