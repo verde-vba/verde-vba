@@ -112,7 +112,15 @@ try {
             $existing.CodeModule.AddFromString($code)
         }
     } else {
-        $wb.VBProject.VBComponents.Import($modulePath)
+        $ext = [System.IO.Path]::GetExtension($modulePath)
+        $tempPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'verde_import' + $ext)
+        try {
+            $text = [System.IO.File]::ReadAllText($modulePath, [System.Text.Encoding]::UTF8)
+            [System.IO.File]::WriteAllText($tempPath, $text, [System.Text.Encoding]::Default)
+            $wb.VBProject.VBComponents.Import($tempPath)
+        } finally {
+            Remove-Item $tempPath -ErrorAction SilentlyContinue
+        }
     }
     $wb.Save()
     $wb.Close($false)
