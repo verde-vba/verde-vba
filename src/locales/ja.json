@@ -4,6 +4,7 @@
   },
   "common": {
     "close": "閉じる",
+    "unsaved": "未保存の変更",
     "dismiss": "閉じる",
     "fileTypeExcelMacro": "Excel マクロ"
   },
@@ -37,6 +38,15 @@
     "message": "{{count}} 個のモジュールが Verde と Excel の両方で変更されています。",
     "keepFile": "Verde 側を保持",
     "keepExcel": "Excel 側を保持"
+  },
+  "saveConfirm": {
+    "title": "未保存の変更",
+    "message": "{{filename}} への変更を保存しますか？",
+    "save": "保存",
+    "discard": "保存しない",
+    "cancel": "キャンセル",
+    "titleWindow": "未保存の変更",
+    "messageWindow": "未保存の変更があります。閉じる前にすべて保存しますか？"
   },
   "trust": {
     "title": "セットアップが必要です",

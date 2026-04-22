@@ -4,6 +4,7 @@
   },
   "common": {
     "close": "Close",
+    "unsaved": "Unsaved changes",
     "dismiss": "Dismiss",
     "fileTypeExcelMacro": "Excel Macro"
   },
@@ -37,6 +38,15 @@
     "message": "{{count}} module(s) have been modified in both Verde and Excel.",
     "keepFile": "Keep Verde version",
     "keepExcel": "Keep Excel version"
+  },
+  "saveConfirm": {
+    "title": "Unsaved Changes",
+    "message": "Do you want to save changes to {{filename}}?",
+    "save": "Save",
+    "discard": "Don't Save",
+    "cancel": "Cancel",
+    "titleWindow": "Unsaved Changes",
+    "messageWindow": "You have unsaved changes. Do you want to save all changes before closing?"
   },
   "trust": {
     "title": "Setup Required",

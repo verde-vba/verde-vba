@@ -4,6 +4,7 @@ import type { ModuleInfo } from "../lib/types";
 interface TabBarProps {
   openModules: ModuleInfo[];
   activeModule: ModuleInfo | null;
+  dirtyModules?: ReadonlySet<string>;
   onSelectModule: (module: ModuleInfo) => void;
   onCloseModule: (module: ModuleInfo) => void;
 }
@@ -11,6 +12,7 @@ interface TabBarProps {
 export function TabBar({
   openModules,
   activeModule,
+  dirtyModules,
   onSelectModule,
   onCloseModule,
 }: TabBarProps) {
@@ -31,6 +33,7 @@ export function TabBar({
     >
       {openModules.map((mod) => {
         const isActive = activeModule?.filename === mod.filename;
+        const isDirty = dirtyModules?.has(mod.filename) ?? false;
         return (
           <div
             key={mod.filename}
@@ -51,7 +54,7 @@ export function TabBar({
             <span>{mod.filename}</span>
             <button
               type="button"
-              aria-label={t("common.close")}
+              aria-label={isDirty ? t("common.unsaved") : t("common.close")}
               onClick={(e) => {
                 e.stopPropagation();
                 onCloseModule(mod);
@@ -61,9 +64,11 @@ export function TabBar({
                 lineHeight: 1,
                 opacity: 0.6,
                 padding: "2px",
+                width: "18px",
+                textAlign: "center",
               }}
             >
-              ×
+              {isDirty ? "●" : "×"}
             </button>
           </div>
         );

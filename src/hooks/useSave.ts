@@ -23,21 +23,23 @@ export function useSave({
   const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(null);
 
   const handleSave = useCallback(
-    async (content: string) => {
-      if (!activeModule) return;
+    async (content: string): Promise<boolean> => {
+      if (!activeModule) return false;
       try {
         await saveModule(activeModule.filename, content);
         setExcelOpenPrompt(null);
         setSaveBlockedPrompt(null);
+        return true;
       } catch (e) {
         // Read-only saves short-circuit in the hook with a sentinel
         // message — translate it at the call site rather than leaking
         // the constant into the render tree.
         if (e instanceof Error && e.message === SAVE_BLOCKED_READONLY) {
           setSaveBlockedPrompt(saveBlockedMessage);
-          return;
+          return false;
         }
         handleCaughtBackendError(e, xlsmPath);
+        return false;
       }
       // TODO: wire ConflictDialog here once the backend reports
       // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
