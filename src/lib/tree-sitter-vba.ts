@@ -4,6 +4,7 @@ import {
   type Language,
   type Node,
   type QueryCapture,
+  type TreeCursor,
 } from "web-tree-sitter";
 import type { languages } from "monaco-editor";
 
@@ -213,11 +214,157 @@ export async function registerTreeSitterVbaProvider(
   if (result.ok) {
     const provider = createVbaSemanticTokensProvider(result.language);
     monaco.languages.registerDocumentSemanticTokensProvider(languageId, provider);
+    const foldingProvider = createVbaFoldingRangeProvider(result.language);
+    monaco.languages.registerFoldingRangeProvider(languageId, foldingProvider);
   } else {
     options.onError?.(result);
   }
   return result;
 }
+
+// ── Folding range computation ───────────────────────────────────
+
+// Node types whose multi-line span should produce a folding range.
+const FOLDABLE_NODE_TYPES = new Set([
+  "sub_declaration",
+  "function_declaration",
+  "property_declaration",
+  "if_statement",
+  "for_statement",
+  "do_statement",
+  "while_statement",
+  "select_statement",
+  "with_statement",
+  "type_declaration",
+  "enum_declaration",
+]);
+
+export interface VbaFoldingRange {
+  startLine: number; // 0-based
+  endLine: number;   // 0-based
+  kind?: "comment";
+}
+
+/**
+ * Walk the tree-sitter AST and collect folding ranges for VBA block
+ * constructs. Returns 0-based line ranges; the Monaco provider converts
+ * them to 1-based before handing them off.
+ */
+export function computeFoldingRanges(rootNode: Node): VbaFoldingRange[] {
+  const ranges: VbaFoldingRange[] = [];
+
+  // DFS via TreeCursor — efficient, avoids allocating child arrays.
+  const cursor: TreeCursor = rootNode.walk();
+  let reachedRoot = false;
+  while (!reachedRoot) {
+    const nodeType = cursor.nodeType;
+    if (FOLDABLE_NODE_TYPES.has(nodeType)) {
+      const startLine = cursor.startPosition.row;
+      const endLine = cursor.endPosition.row;
+      if (endLine > startLine) {
+        ranges.push({ startLine, endLine });
+      }
+    }
+
+    // Standard DFS: child → sibling → backtrack
+    if (cursor.gotoFirstChild()) continue;
+    if (cursor.gotoNextSibling()) continue;
+    while (true) {
+      if (!cursor.gotoParent()) {
+        reachedRoot = true;
+        break;
+      }
+      if (cursor.gotoNextSibling()) break;
+    }
+  }
+
+  // Group consecutive top-level / sibling comment nodes into a single
+  // "comment" folding range. We scan rootNode's direct children and
+  // every statement_block's children for runs of adjacent comment lines.
+  collectCommentRanges(rootNode, ranges);
+
+  return ranges;
+}
+
+function collectCommentRanges(
+  parent: Node,
+  out: VbaFoldingRange[],
+): void {
+  // Scan children at this level for comment runs, then recurse into
+  // statement_block children to catch comments inside Sub/Function bodies.
+  let runStart = -1;
+  let runEnd = -1;
+
+  for (let i = 0; i < parent.childCount; i++) {
+    const child = parent.child(i)!;
+    if (child.type === "comment") {
+      const line = child.startPosition.row;
+      if (runStart < 0) {
+        runStart = line;
+        runEnd = line;
+      } else if (line === runEnd + 1) {
+        runEnd = line;
+      } else {
+        if (runEnd > runStart) {
+          out.push({ startLine: runStart, endLine: runEnd, kind: "comment" });
+        }
+        runStart = line;
+        runEnd = line;
+      }
+    } else {
+      if (runStart >= 0 && runEnd > runStart) {
+        out.push({ startLine: runStart, endLine: runEnd, kind: "comment" });
+      }
+      runStart = -1;
+      runEnd = -1;
+
+      // Recurse into statement_block children
+      if (child.type === "statement_block") {
+        collectCommentRanges(child, out);
+      }
+    }
+  }
+  // Flush trailing run
+  if (runStart >= 0 && runEnd > runStart) {
+    out.push({ startLine: runStart, endLine: runEnd, kind: "comment" });
+  }
+}
+
+// ── Folding range Monaco provider ───────────────────────────────
+
+export function createVbaFoldingRangeProvider(
+  language: Language,
+): languages.FoldingRangeProvider {
+  let cached: { parser: Parser } | null = null;
+
+  return {
+    provideFoldingRanges(model) {
+      if (!cached) {
+        const parser = new Parser();
+        parser.setLanguage(language);
+        cached = { parser };
+      }
+
+      const tree = cached.parser.parse(model.getValue());
+      if (!tree) return [];
+
+      try {
+        const ranges = computeFoldingRanges(tree.rootNode);
+        return ranges.map((r) => ({
+          start: r.startLine + 1,
+          end: r.endLine + 1,
+          kind: r.kind === "comment"
+            ? (1 as import("monaco-editor").languages.FoldingRangeKind) // Comment
+            : undefined,
+        }));
+      } finally {
+        tree.delete();
+      }
+    },
+  };
+}
+
+// ── Semantic tokens provider ────────────────────────────────────
 
 export function createVbaSemanticTokensProvider(
   language: Language

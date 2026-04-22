@@ -16,19 +16,8 @@ describe("vbaLanguageConfig (Sprint 31.G — language config only, tree-sitter o
     expect(vbaLanguageConfig.brackets).toEqual([["(", ")"]]);
   });
 
-  it("pins folding start/end keywords (Sub, Function, Property, If, For, Do, While, Select, With, Type, Enum)", () => {
-    const startSource = vbaLanguageConfig.folding?.markers?.start.source ?? "";
-    expect(startSource).toContain("Sub");
-    expect(startSource).toContain("Function");
-    expect(startSource).toContain("Property");
-    expect(startSource).toContain("Enum");
-    expect(startSource).toContain("Type");
-
-    const endSource = vbaLanguageConfig.folding?.markers?.end.source ?? "";
-    expect(endSource).toContain("End");
-    expect(endSource).toContain("Next");
-    expect(endSource).toContain("Loop");
-    expect(endSource).toContain("Wend");
+  it("does not define regex folding markers (tree-sitter FoldingRangeProvider owns folding)", () => {
+    expect(vbaLanguageConfig.folding).toBeUndefined();
   });
 
   it("auto-closes parens and double-quotes", () => {
