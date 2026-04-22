@@ -116,7 +116,7 @@ describe("useLspClient", () => {
     );
 
     await waitFor(() =>
-      expect(onError).toHaveBeenCalledWith("spawn-failed", undefined),
+      expect(onError).toHaveBeenCalledWith("spawn-failed", "ENOENT: sidecar missing"),
     );
   });
 

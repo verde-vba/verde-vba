@@ -19,7 +19,7 @@
 // available.
 
 import { useEffect, useRef, useState } from "react";
-import { createMessageConnection } from "vscode-jsonrpc";
+import { createMessageConnection, ResponseError } from "vscode-jsonrpc";
 import type { MessageConnection } from "vscode-jsonrpc";
 import type { LspTransport } from "../lib/lsp-bridge";
 import { createTransports } from "../lib/lsp-message-transports";
@@ -200,10 +200,27 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes(LSP_NOT_SPAWNED_SENTINEL)) {
           reportOnce("not-spawned");
+        } else if (err instanceof ResponseError) {
+          // JSON-RPC -32600 (InvalidRequest) from a duplicate `initialize`
+          // means the sidecar was already initialized — e.g. React StrictMode
+          // double-mount. The connection is still usable; register providers.
+          if (err.code === -32600 && connection) {
+            providerDisposables = registerLspProviders(
+              monaco,
+              connection,
+              "vba",
+              { resolveDocumentUri },
+            );
+            retryCount.current = 0;
+            initializedRef.current = true;
+            setReady(true);
+            return;
+          }
+          reportOnce("initialize-failed", msg);
         } else if (msg.includes("ServerError") || msg.includes("-32")) {
           reportOnce("initialize-failed", msg);
         } else {
-          reportOnce("spawn-failed");
+          reportOnce("spawn-failed", msg);
         }
       }
     })();
