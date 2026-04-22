@@ -19,6 +19,55 @@ fn decode_vba_bytes(bytes: &[u8]) -> String {
     let (cow, _, _) = encoding_rs::SHIFT_JIS.decode(bytes);
     cow.into_owned()
 }
+
+/// Advance past the current line, returning the byte offset of the next line.
+fn next_line_start(source: &str, from: usize) -> usize {
+    source[from..]
+        .find('\n')
+        .map_or(source.len(), |p| from + p + 1)
+}
+
+/// Byte offset in `source` where the VBA code body begins, past the
+/// metadata header (VERSION, BEGIN…END, Attribute VB_* lines) that
+/// Excel's VBA Editor hides from the user.
+fn vba_body_offset(source: &str) -> usize {
+    let mut pos = 0;
+
+    // VERSION line (e.g. "VERSION 1.0 CLASS")
+    if source.starts_with("VERSION ") {
+        pos = next_line_start(source, pos);
+    }
+
+    // BEGIN…END block (class preamble or form layout)
+    if pos < source.len()
+        && (source[pos..].starts_with("BEGIN\r")
+            || source[pos..].starts_with("BEGIN\n")
+            || source[pos..].starts_with("Begin "))
+    {
+        pos = next_line_start(source, pos);
+        while pos < source.len() {
+            let rest = &source[pos..];
+            let is_end = rest.starts_with("END\r")
+                || rest.starts_with("END\n")
+                || rest == "END"
+                || rest.starts_with("End\r")
+                || rest.starts_with("End\n")
+                || rest == "End";
+            pos = next_line_start(source, pos);
+            if is_end {
+                break;
+            }
+        }
+    }
+
+    // Leading Attribute VB_* lines
+    while pos < source.len() && source[pos..].starts_with("Attribute VB_") {
+        pos = next_line_start(source, pos);
+    }
+
+    pos
+}
+
 use crate::settings::Settings;
 use crate::vba_bridge::VbaBridge;
 
@@ -369,7 +418,25 @@ impl ProjectManager {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let project_dir = Self::project_dir(project_id);
         let file_path = project_dir.join(filename);
-        std::fs::write(&file_path, content)?;
+
+        // The editor displays code without the VBA metadata header
+        // (read_module strips it). Restore the original header from the
+        // on-disk file before writing so that VBComponent.Import() and
+        // conflict-detection hashes stay consistent.
+        let full_content = if file_path.exists() {
+            let bytes = std::fs::read(&file_path)?;
+            let existing = decode_vba_bytes(&bytes);
+            let offset = vba_body_offset(&existing);
+            if offset > 0 {
+                format!("{}{content}", &existing[..offset])
+            } else {
+                content.to_string()
+            }
+        } else {
+            content.to_string()
+        };
+
+        std::fs::write(&file_path, &full_content)?;
 
         // Auto-import to Excel (PLANS §9 step 3). Settings default to enabled;
         // treat a missing/corrupt settings file as "enabled" rather than
@@ -392,7 +459,7 @@ impl ProjectManager {
                 // Only update the stored hash after Excel has accepted the
                 // import — otherwise a later conflict check would think the
                 // workbook is in sync when it isn't.
-                Self::update_module_hash(project_id, filename, content)?;
+                Self::update_module_hash(project_id, filename, &full_content)?;
             }
             // No meta yet (project never fully opened): skip import but keep
             // the on-disk write so the user doesn't lose work.
@@ -467,8 +534,11 @@ impl ProjectManager {
     }
 
     /// Read a single module's source content from the project directory.
-    /// Returns the file content as a UTF-8 String, decoding Shift-JIS
-    /// when necessary (same strategy as `export_and_init`).
+    /// Returns the code body **without** the VBA metadata header
+    /// (VERSION, BEGIN…END, Attribute VB_* lines), matching what Excel's
+    /// VBA Editor displays. The raw header is preserved on disk for
+    /// `VBComponent.Import()` and conflict-detection hashes; `save_module`
+    /// re-prepends it on write.
     pub fn read_module(
         project_id: &str,
         filename: &str,
@@ -479,7 +549,8 @@ impl ProjectManager {
             return Err(format!("module not found: {filename}").into());
         }
         let bytes = std::fs::read(&path)?;
-        Ok(decode_vba_bytes(&bytes))
+        let content = decode_vba_bytes(&bytes);
+        Ok(content[vba_body_offset(&content)..].to_string())
     }
 
     pub async fn get_info(
@@ -963,5 +1034,76 @@ mod tests {
             "error message must contain 'project metadata is corrupted' \
              (stable substring for frontend pattern-matching), got: {msg}"
         );
+    }
+
+    // --- vba_body_offset: metadata stripping ---
+
+    #[test]
+    fn vba_body_offset_strips_bas_attribute() {
+        let source =
+            "Attribute VB_Name = \"Module1\"\nOption Explicit\nSub Foo()\nEnd Sub\n";
+        let offset = vba_body_offset(source);
+        assert_eq!(&source[offset..], "Option Explicit\nSub Foo()\nEnd Sub\n");
+    }
+
+    #[test]
+    fn vba_body_offset_strips_cls_header() {
+        let source = "\
+VERSION 1.0 CLASS\r\n\
+BEGIN\r\n\
+  MultiUse = -1  'True\r\n\
+END\r\n\
+Attribute VB_Name = \"Sheet1\"\r\n\
+Attribute VB_GlobalNameSpace = False\r\n\
+Attribute VB_Creatable = False\r\n\
+Attribute VB_PredeclaredId = True\r\n\
+Attribute VB_Exposed = True\r\n\
+Option Explicit\r\n";
+        let offset = vba_body_offset(source);
+        assert_eq!(&source[offset..], "Option Explicit\r\n");
+    }
+
+    #[test]
+    fn vba_body_offset_strips_cls_header_lf() {
+        let source = "\
+VERSION 1.0 CLASS\n\
+BEGIN\n\
+  MultiUse = -1  'True\n\
+END\n\
+Attribute VB_Name = \"Sheet1\"\n\
+Attribute VB_GlobalNameSpace = False\n\
+Option Explicit\n";
+        let offset = vba_body_offset(source);
+        assert_eq!(&source[offset..], "Option Explicit\n");
+    }
+
+    #[test]
+    fn vba_body_offset_returns_zero_for_plain_code() {
+        let source = "Option Explicit\nSub Foo()\nEnd Sub\n";
+        assert_eq!(vba_body_offset(source), 0);
+    }
+
+    #[test]
+    fn vba_body_offset_returns_zero_for_empty_string() {
+        assert_eq!(vba_body_offset(""), 0);
+    }
+
+    #[test]
+    fn vba_body_offset_preserves_inline_attribute_lines() {
+        // Procedure-level Attribute lines in the body must NOT be stripped.
+        let source = "Attribute VB_Name = \"Module1\"\n\
+                       Sub Foo()\n\
+                       Attribute Foo.VB_Description = \"desc\"\n\
+                       End Sub\n";
+        let offset = vba_body_offset(source);
+        assert!(source[offset..].starts_with("Sub Foo()"));
+    }
+
+    #[test]
+    fn vba_body_offset_handles_only_metadata() {
+        // File with only metadata and no body code.
+        let source = "Attribute VB_Name = \"Module1\"\n";
+        let offset = vba_body_offset(source);
+        assert_eq!(&source[offset..], "");
     }
 }
