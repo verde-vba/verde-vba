@@ -45,6 +45,122 @@ macro_rules! hresult_catch {
     };
 }
 
+/// Null-guards for `$wb` and `$wb.VBProject` after `excel_connect!`.
+///
+/// Two distinct failure modes require separate diagnostics:
+///
+/// 1. **`$wb` is null** — `excel_connect!` failed to find or open the
+///    workbook.  Common causes: path-comparison mismatch between
+///    `$w.FullName` and the env-var path (8.3 short names, UNC vs drive
+///    letter), `Workbooks.Open` returning `$null` when `DisplayAlerts`
+///    is off and the file is locked, or `GetActiveObject` connecting to
+///    a different Excel instance that doesn't have the workbook open.
+///    Tag: `VERDE_WB_NULL`.
+///
+/// 2. **`$wb.VBProject` is null** — workbook is open but VBProject is
+///    inaccessible.  Most likely cause: Trust Center setting "Trust
+///    access to the VBA project object model" is disabled. Can also
+///    happen when the VBA project is password-protected.
+///    Tag: `VERDE_TRUST_DENIED`.
+///
+/// PowerShell silently returns `$null` for property access on null
+/// objects (no exception thrown), so without these guards the failure
+/// manifests as a generic "null-valued expression" error at the first
+/// *method call* (`Import`, `Remove`, `Export`), far from the root
+/// cause.  The tags are locale-agnostic so the Rust classifier can
+/// branch on them deterministically.
+#[cfg(windows)]
+macro_rules! vbproject_guard {
+    () => {
+        r#"
+    if (-not $wb) {
+        [Console]::Error.WriteLine("VERDE_WB_NULL")
+        throw "Workbook reference is null after connection attempt. The workbook may not have been found or opened successfully."
+    }
+    if (-not $wb.VBProject) {
+        [Console]::Error.WriteLine("VERDE_TRUST_DENIED")
+        throw "Cannot access VBProject. Enable 'Trust access to the VBA project object model' in Excel Trust Center settings."
+    }
+"#
+    };
+}
+
+/// Reuse an already-running Excel instance and its open workbook when
+/// possible.  Falls back to `New-Object` → `Workbooks.Open` if no active
+/// Excel process or the target file is not yet open.
+///
+/// **Same-name conflict fallback**: Excel cannot hold two workbooks with
+/// the same filename, even from different directories.  When
+/// `GetActiveObject` finds a running instance that already has a
+/// same-named workbook open at a *different* path, `Workbooks.Open`
+/// returns `$null` (because `DisplayAlerts` is off, the confirmation
+/// dialog is suppressed).  In that case we abandon the existing instance
+/// and create a dedicated one where `Open` will succeed.
+///
+/// Exposes `$ownExcel` / `$ownWb` / `$savedAlerts` so that
+/// `excel_disconnect!` knows what to clean up.
+#[cfg(windows)]
+macro_rules! excel_connect {
+    () => {
+        r#"
+$xlsmFull = [System.IO.Path]::GetFullPath($xlsmPath)
+$ownExcel = $false
+$ownWb = $false
+$savedAlerts = $true
+try {
+    $excel = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
+} catch {
+    $excel = New-Object -ComObject Excel.Application
+    $excel.Visible = $false
+    $ownExcel = $true
+}
+$savedAlerts = $excel.DisplayAlerts
+$excel.DisplayAlerts = $false
+$wb = $null
+foreach ($w in $excel.Workbooks) {
+    try {
+        if ([System.IO.Path]::GetFullPath($w.FullName) -eq $xlsmFull) {
+            $wb = $w
+            break
+        }
+    } catch { }
+}
+if (-not $wb) {
+    $wb = $excel.Workbooks.Open($xlsmFull)
+    $ownWb = $true
+}
+if (-not $wb -and -not $ownExcel) {
+    $excel.DisplayAlerts = $savedAlerts
+    $excel = New-Object -ComObject Excel.Application
+    $excel.Visible = $false
+    $ownExcel = $true
+    $savedAlerts = $excel.DisplayAlerts
+    $excel.DisplayAlerts = $false
+    $wb = $excel.Workbooks.Open($xlsmFull)
+    $ownWb = $true
+}
+"#
+    };
+}
+
+/// Restore `DisplayAlerts`, close the workbook only if we opened it,
+/// and quit Excel only if we launched it.
+/// Null-guards `$excel` / `$wb` so the `finally` block never crashes
+/// when `excel_connect` failed before assigning them.
+#[cfg(windows)]
+macro_rules! excel_disconnect {
+    () => {
+        r#"
+    if ($excel) { $excel.DisplayAlerts = $savedAlerts }
+    if ($ownWb -and $wb) { $wb.Close($false) }
+    if ($ownExcel -and $excel) {
+        $excel.Quit()
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+    }
+"#
+    };
+}
+
 #[cfg(windows)]
 const EXPORT_SCRIPT: &str = concat!(
     r#"
@@ -55,6 +171,9 @@ $excel.Visible = $false
 $excel.DisplayAlerts = $false
 try {
     $wb = $excel.Workbooks.Open($xlsmPath)
+"#,
+    vbproject_guard!(),
+    r#"
     $modules = @()
     foreach ($comp in $wb.VBProject.VBComponents) {
         $ext = switch ($comp.Type) {
@@ -87,11 +206,12 @@ const IMPORT_SCRIPT: &str = concat!(
 $xlsmPath   = $env:VERDE_XLSM_PATH
 $moduleName = $env:VERDE_MODULE_NAME
 $modulePath = $env:VERDE_MODULE_PATH
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $false
-$excel.DisplayAlerts = $false
+$ErrorActionPreference = 'Stop'
 try {
-    $wb = $excel.Workbooks.Open($xlsmPath)
+"#,
+    excel_connect!(),
+    vbproject_guard!(),
+    r#"
     $existing = $wb.VBProject.VBComponents | Where-Object { $_.Name -eq $moduleName }
     if ($existing -and $existing.Type -ne 100) {
         $wb.VBProject.VBComponents.Remove($existing)
@@ -123,13 +243,13 @@ try {
         }
     }
     $wb.Save()
-    $wb.Close($false)
 "#,
     hresult_catch!(),
     r#"
 } finally {
-    $excel.Quit()
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+"#,
+    excel_disconnect!(),
+    r#"
 }
 "#
 );
@@ -143,11 +263,12 @@ const IMPORT_BATCH_SCRIPT: &str = concat!(
 $xlsmPath  = $env:VERDE_XLSM_PATH
 $sourceDir = $env:VERDE_SOURCE_DIR
 $modules   = $env:VERDE_MODULES_JSON | ConvertFrom-Json
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $false
-$excel.DisplayAlerts = $false
+$ErrorActionPreference = 'Stop'
 try {
-    $wb = $excel.Workbooks.Open($xlsmPath)
+"#,
+    excel_connect!(),
+    vbproject_guard!(),
+    r#"
     foreach ($filename in $modules) {
         $moduleName = [System.IO.Path]::GetFileNameWithoutExtension($filename)
         $modulePath = Join-Path $sourceDir $filename
@@ -183,13 +304,13 @@ try {
         }
     }
     $wb.Save()
-    $wb.Close($false)
 "#,
     hresult_catch!(),
     r#"
 } finally {
-    $excel.Quit()
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+"#,
+    excel_disconnect!(),
+    r#"
 }
 "#
 );

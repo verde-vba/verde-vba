@@ -78,6 +78,17 @@ describe("parseBackendError", () => {
     });
   });
 
+  it("parses a TRUST_ACCESS error, preserving the detail suffix", () => {
+    const result = parseBackendError(
+      "TRUST_ACCESS: VBProject is not accessible. Enable 'Trust access to the VBA project object model' in Excel settings.",
+    );
+    expect(result).toEqual({
+      kind: "trustAccessDenied",
+      detail:
+        " VBProject is not accessible. Enable 'Trust access to the VBA project object model' in Excel settings.",
+    });
+  });
+
   it("unwraps Error instances when parsing project-not-found", () => {
     const result = parseBackendError(new Error("project not found: xyz"));
     expect(result).toEqual({
@@ -117,6 +128,11 @@ describe("toI18nKey", () => {
     expect(toI18nKey(parsed)).toBe("status.excelOpen");
   });
 
+  it("maps trustAccessDenied to trust for TrustGuideDialog consumers", () => {
+    const parsed = parseBackendError("TRUST_ACCESS: VBProject is not accessible.");
+    expect(toI18nKey(parsed)).toBe("trust");
+  });
+
   it("returns undefined for generic so callers fall back to the raw message", () => {
     const parsed = parseBackendError("something unexpected");
     expect(toI18nKey(parsed)).toBeUndefined();
@@ -143,6 +159,7 @@ describe("toI18nKey locale contract", () => {
       },
       { input: "LOCKED:u:m:t", expectsTitleMessage: true },
       { input: "EXCEL_OPEN: busy", expectsTitleMessage: false },
+      { input: "TRUST_ACCESS: denied", expectsTitleMessage: true },
     ];
 
     for (const { input, expectsTitleMessage } of samples) {

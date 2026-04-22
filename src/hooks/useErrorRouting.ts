@@ -1,7 +1,11 @@
 import { useCallback, useState } from "react";
 import { type ParsedError } from "../lib/error-parse";
 
-export function useErrorRouting() {
+interface UseErrorRoutingOptions {
+  onTrustAccessDenied?: () => void;
+}
+
+export function useErrorRouting(options?: UseErrorRoutingOptions) {
   const [errorBanner, setErrorBanner] = useState<ParsedError | null>(null);
   const [excelOpenPrompt, setExcelOpenPrompt] = useState<string | null>(null);
 
@@ -17,6 +21,9 @@ export function useErrorRouting() {
       case "excelOpen":
         setExcelOpenPrompt(parsed.detail);
         return;
+      case "trustAccessDenied":
+        options?.onTrustAccessDenied?.();
+        return;
       case "projectNotFound":
       case "projectCorrupted":
       case "generic":
@@ -27,7 +34,7 @@ export function useErrorRouting() {
         return _exhaustive;
       }
     }
-  }, []);
+  }, [options?.onTrustAccessDenied]);
 
   return {
     errorBanner,

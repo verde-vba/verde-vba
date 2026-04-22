@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getSettings, saveSettings } from "../lib/tauri-commands";
 
 /// Hook for the VBA-trust first-launch acknowledgement.
@@ -28,5 +28,7 @@ export function useTrust() {
     }
   };
 
-  return { acknowledged, acknowledge };
+  const reset = useCallback(() => setAcknowledged(false), []);
+
+  return { acknowledged, acknowledge, reset };
 }

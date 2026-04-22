@@ -8,6 +8,7 @@
 export type ParsedError =
   | { kind: "locked"; user: string; machine: string; time: string }
   | { kind: "excelOpen"; detail: string }
+  | { kind: "trustAccessDenied"; detail: string }
   | { kind: "projectNotFound"; detail: string }
   | { kind: "projectCorrupted"; detail: string }
   | { kind: "generic"; message: string };
@@ -25,6 +26,12 @@ export function parseBackendError(raw: unknown): ParsedError {
   }
   if (msg.startsWith("EXCEL_OPEN:")) {
     return { kind: "excelOpen", detail: msg.slice("EXCEL_OPEN:".length) };
+  }
+  if (msg.startsWith("TRUST_ACCESS:")) {
+    return {
+      kind: "trustAccessDenied",
+      detail: msg.slice("TRUST_ACCESS:".length),
+    };
   }
   if (msg.startsWith("project metadata is corrupted:")) {
     return {
@@ -57,6 +64,8 @@ export function toI18nKey(parsed: ParsedError): string | undefined {
       return "lock";
     case "excelOpen":
       return "status.excelOpen";
+    case "trustAccessDenied":
+      return "trust";
     case "projectNotFound":
       return "errors.projectNotFound";
     case "projectCorrupted":
