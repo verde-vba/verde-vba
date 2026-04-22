@@ -498,6 +498,9 @@ impl ProjectManager {
         let xlsm_path = Self::load_meta_for_sync(project_id)?.xlsm_path;
         let source_dir = project_dir.to_string_lossy().to_string();
 
+        // Collect module filenames first, then batch-import in a single
+        // PowerShell/Excel session instead of one process per module.
+        let mut module_files: Vec<String> = Vec::new();
         for entry in std::fs::read_dir(&project_dir)? {
             let entry = entry?;
             if !entry.file_type()?.is_file() {
@@ -507,14 +510,20 @@ impl ProjectManager {
             if name.starts_with('.') {
                 continue;
             }
-            VbaBridge::import(&xlsm_path, &source_dir, &name)
-                .await
-                .map_err(Self::classify_import_error)?;
-            // Refresh meta hash from the on-disk bytes we just imported so a
-            // subsequent conflict check sees the workbook as in sync.
-            let bytes = std::fs::read(entry.path())?;
+            module_files.push(name);
+        }
+
+        let refs: Vec<&str> = module_files.iter().map(|s| s.as_str()).collect();
+        VbaBridge::import_batch(&xlsm_path, &source_dir, &refs)
+            .await
+            .map_err(Self::classify_import_error)?;
+
+        // Refresh meta hashes after the batch import succeeds so a
+        // subsequent conflict check sees the workbook as in sync.
+        for name in &module_files {
+            let bytes = std::fs::read(project_dir.join(name))?;
             let content = decode_vba_bytes(&bytes);
-            Self::update_module_hash(project_id, &name, &content)?;
+            Self::update_module_hash(project_id, name, &content)?;
         }
 
         Ok(())
@@ -665,11 +674,13 @@ impl ProjectManager {
 
         match side {
             "verde" => {
-                // Walk the AppData dir and push each module into Excel.
+                // Walk the AppData dir and batch-push all modules into Excel
+                // in a single PowerShell/Excel session.
                 if !project_dir.exists() {
                     return Err("Project directory not found".into());
                 }
                 let source_dir = project_dir.to_string_lossy().to_string();
+                let mut module_files: Vec<String> = Vec::new();
                 for entry in std::fs::read_dir(&project_dir)? {
                     let entry = entry?;
                     if !entry.file_type()?.is_file() {
@@ -679,12 +690,18 @@ impl ProjectManager {
                     if name.starts_with('.') {
                         continue;
                     }
-                    VbaBridge::import(xlsm_path, &source_dir, &name)
-                        .await
-                        .map_err(Self::classify_import_error)?;
-                    let bytes = std::fs::read(entry.path())?;
+                    module_files.push(name);
+                }
+
+                let refs: Vec<&str> = module_files.iter().map(|s| s.as_str()).collect();
+                VbaBridge::import_batch(xlsm_path, &source_dir, &refs)
+                    .await
+                    .map_err(Self::classify_import_error)?;
+
+                for name in &module_files {
+                    let bytes = std::fs::read(project_dir.join(name))?;
                     let content = decode_vba_bytes(&bytes);
-                    Self::update_module_hash(project_id, &name, &content)?;
+                    Self::update_module_hash(project_id, name, &content)?;
                 }
                 Ok(())
             }

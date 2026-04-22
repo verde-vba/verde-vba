@@ -134,6 +134,66 @@ try {
 "#
 );
 
+/// Batch import: open Excel once, import all modules, save once.
+/// VERDE_MODULES_JSON carries a JSON array of filenames; VERDE_SOURCE_DIR
+/// is the directory containing those files.
+#[cfg(windows)]
+const IMPORT_BATCH_SCRIPT: &str = concat!(
+    r#"
+$xlsmPath  = $env:VERDE_XLSM_PATH
+$sourceDir = $env:VERDE_SOURCE_DIR
+$modules   = $env:VERDE_MODULES_JSON | ConvertFrom-Json
+$excel = New-Object -ComObject Excel.Application
+$excel.Visible = $false
+$excel.DisplayAlerts = $false
+try {
+    $wb = $excel.Workbooks.Open($xlsmPath)
+    foreach ($filename in $modules) {
+        $moduleName = [System.IO.Path]::GetFileNameWithoutExtension($filename)
+        $modulePath = Join-Path $sourceDir $filename
+        $existing = $wb.VBProject.VBComponents | Where-Object { $_.Name -eq $moduleName }
+        if ($existing -and $existing.Type -ne 100) {
+            $wb.VBProject.VBComponents.Remove($existing)
+        }
+        if ($existing -and $existing.Type -eq 100) {
+            $lines = [System.IO.File]::ReadAllLines($modulePath, [System.Text.Encoding]::UTF8)
+            $codeStart = 0
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^Attribute VB_') { $codeStart = $i + 1 }
+            }
+            if ($codeStart -lt $lines.Count) {
+                $code = [string]::Join("`r`n", $lines[$codeStart..($lines.Count - 1)])
+            } else {
+                $code = ''
+            }
+            $existing.CodeModule.DeleteLines(1, $existing.CodeModule.CountOfLines)
+            if ($code.Trim().Length -gt 0) {
+                $existing.CodeModule.AddFromString($code)
+            }
+        } else {
+            $ext = [System.IO.Path]::GetExtension($modulePath)
+            $tempPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'verde_import_' + $moduleName + $ext)
+            try {
+                $text = [System.IO.File]::ReadAllText($modulePath, [System.Text.Encoding]::UTF8)
+                [System.IO.File]::WriteAllText($tempPath, $text, [System.Text.Encoding]::Default)
+                $wb.VBProject.VBComponents.Import($tempPath)
+            } finally {
+                Remove-Item $tempPath -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    $wb.Save()
+    $wb.Close($false)
+"#,
+    hresult_catch!(),
+    r#"
+} finally {
+    $excel.Quit()
+    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
+}
+"#
+);
+
 pub struct VbaBridge;
 
 impl VbaBridge {
@@ -200,6 +260,41 @@ impl VbaBridge {
         Ok(())
     }
 
+    /// Batch-import multiple modules in a single PowerShell/Excel session.
+    /// Opens the workbook once, imports all modules, saves once, closes once.
+    #[cfg(windows)]
+    pub async fn import_batch(
+        xlsm_path: &str,
+        source_dir: &str,
+        module_filenames: &[&str],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if module_filenames.is_empty() {
+            return Ok(());
+        }
+
+        let modules_json = serde_json::to_string(module_filenames)?;
+
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                IMPORT_BATCH_SCRIPT,
+            ])
+            .env("VERDE_XLSM_PATH", xlsm_path)
+            .env("VERDE_SOURCE_DIR", source_dir)
+            .env("VERDE_MODULES_JSON", &modules_json)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("PowerShell batch import failed: {}", stderr).into());
+        }
+
+        Ok(())
+    }
+
     #[cfg(not(windows))]
     pub async fn export(
         _xlsm_path: &str,
@@ -214,6 +309,18 @@ impl VbaBridge {
         _source_dir: &str,
         _module_filename: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        Err("VBA bridge requires Windows with Excel installed".into())
+    }
+
+    #[cfg(not(windows))]
+    pub async fn import_batch(
+        _xlsm_path: &str,
+        _source_dir: &str,
+        module_filenames: &[&str],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if module_filenames.is_empty() {
+            return Ok(());
+        }
         Err("VBA bridge requires Windows with Excel installed".into())
     }
 }
@@ -300,6 +407,33 @@ mod tests {
             !msg.contains("PowerShell-sensitive"),
             "validator must be gone — injection is structurally impossible, got: {msg}"
         );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn import_batch_on_non_windows_returns_error_mentioning_windows_requirement() {
+        let result = block_on(VbaBridge::import_batch(
+            "dummy.xlsm",
+            "/tmp/ignored",
+            &["Module1.bas", "Sheet1.cls"],
+        ));
+        let err = result.expect_err("non-Windows import_batch must return Err");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("VBA bridge requires Windows"),
+            "error message should pin the Windows-requirement contract, got: {msg}"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn import_batch_empty_list_returns_ok_without_calling_powershell() {
+        let result = block_on(VbaBridge::import_batch(
+            "dummy.xlsm",
+            "/tmp/ignored",
+            &[],
+        ));
+        assert!(result.is_ok(), "empty batch should be a no-op Ok(())");
     }
 
     #[cfg(not(target_os = "windows"))]
