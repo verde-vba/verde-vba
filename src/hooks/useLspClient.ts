@@ -1,25 +1,32 @@
-// Sprint 32.G GREEN — verde-lsp sidecar handshake + error router.
+// Sprint 32.H — verde-lsp sidecar lifecycle + MessageConnection + Monaco providers.
 //
-// This hook drives the LSP client lifecycle from the React side:
-//   - asks the Rust backend to spawn the sidecar (idempotent) via the
-//     caller-supplied `spawn` injection
-//   - sends the LSP `initialize` request through the transport and waits
-//     for its response to flip `ready` to true
-//   - maps every failure mode (`NOT_SPAWNED` sentinel, other send errors,
-//     sidecar exit, initialize JSON-RPC error) to a single `onError`
-//     callback with a narrow union type, so Editor.tsx can render a
-//     localized Banner without teaching UI code about protocol internals
-//   - on `exit`, automatically retries spawn+initialize up to
-//     `MAX_RETRIES` times with exponential backoff before surfacing
-//     the error to the UI
+// This hook drives the full LSP client lifecycle from the React side:
+//   - asks the Rust backend to spawn the sidecar via the caller-supplied
+//     `spawn` injection
+//   - creates a vscode-jsonrpc MessageConnection from the LspTransport
+//     adapter (lsp-message-transports.ts)
+//   - sends the LSP `initialize` request and `initialized` notification
+//   - registers Monaco completion/hover/diagnostics providers via
+//     registerLspProviders (lsp-monaco-providers.ts)
+//   - on sidecar exit, automatically retries spawn+initialize up to
+//     MAX_RETRIES times with exponential backoff before surfacing the
+//     error to the UI
 //
-// `monaco-languageclient` integration (document selector / completion /
-// hover) is deferred to Sprint 32.H per plan.md §Sprint 32.N. The
-// handshake wired here is sufficient to prove sidecar embedding works
-// end-to-end; 32.H layers MCL on top using the same transport.
+// The hook is gated on the `monaco` parameter: when it is null (Monaco
+// not yet loaded), the hook returns `ready: false` and does nothing.
+// This avoids a race between @monaco-editor/react's async loader and
+// the LSP handshake — providers are only registered after Monaco is
+// available.
 
 import { useEffect, useRef, useState } from "react";
+import { createMessageConnection } from "vscode-jsonrpc";
+import type { MessageConnection } from "vscode-jsonrpc";
 import type { LspTransport } from "../lib/lsp-bridge";
+import { createTransports } from "../lib/lsp-message-transports";
+import {
+  registerLspProviders,
+  type RegisterLspProvidersOptions,
+} from "../lib/lsp-monaco-providers";
 
 export const LSP_NOT_SPAWNED_SENTINEL = "NOT_SPAWNED";
 
@@ -38,66 +45,66 @@ export type LspClientLoadError =
 
 export interface UseLspClientOptions {
   transport: LspTransport;
-  /// Called when the LSP client reaches a terminal error state. `detail`
-  /// carries the JSON-RPC error message from verde-lsp when `reason` is
-  /// `"initialize-failed"`, so the UI can show what went wrong.
+  /// Called when the LSP client reaches a terminal error state.
   onError?: (reason: LspClientLoadError, detail?: string) => void;
-  /// Optional hook to spawn the sidecar before the first send. Injected
-  /// so tests can exercise the handshake without a Tauri runtime; in
-  /// production Editor.tsx supplies `() => invoke("lsp_spawn")`.
+  /// Optional hook to spawn the sidecar before the first send.
   spawn?: () => Promise<void>;
   /// Absolute path to the project directory (AppData). Converted to a
-  /// `file://` URI and sent as `rootUri` in the LSP `initialize` request
-  /// so verde-lsp knows where VBA source files live.
+  /// `file://` URI and sent as `rootUri` in the LSP `initialize` request.
   projectDir?: string | null;
+  /// Monaco instance from `useMonaco()`. When null, the hook does nothing.
+  monaco?: typeof import("monaco-editor") | null;
 }
 
 export interface UseLspClientResult {
-  /// True once the LSP `initialize` response has been received and the
-  /// client is accepting requests. False during handshake and after any
-  /// terminal error.
+  /// True once the LSP `initialize` response has been received and
+  /// providers are registered. False during handshake and after errors.
   ready: boolean;
 }
 
-const INITIALIZE_REQUEST_ID = 1;
-
 /// Convert a filesystem path to a file:// URI suitable for LSP rootUri.
-/// Handles Windows drive-letter paths (C:\foo → file:///C:/foo).
 function pathToFileUri(fsPath: string): string {
   const normalized = fsPath.replace(/\\/g, "/");
-  // Windows absolute path: "C:/..." → "file:///C:/..."
   if (/^[A-Za-z]:/.test(normalized)) {
     return `file:///${normalized}`;
   }
-  // Unix absolute path: "/home/..." → "file:///home/..."
   return `file://${normalized}`;
 }
 
 export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
-  const { transport, onError, spawn, projectDir } = options;
+  const { transport, onError, spawn, projectDir, monaco } = options;
   const [ready, setReady] = useState(false);
-  // Retry counter persists across effect re-runs triggered by `attempt`.
   const retryCount = useRef(0);
   // Tracks whether the current sidecar process has already been
-  // initialized. Persists across StrictMode unmount → remount so the
-  // second mount does not re-send `initialize` (verde-lsp rejects it
-  // with -32600 "Invalid request"). Reset to `false` on sidecar exit
-  // so a restarted process gets a fresh handshake.
+  // initialized. Persists across StrictMode unmount → remount.
   const initializedRef = useRef(false);
   // Incrementing `attempt` re-triggers the effect for a fresh
   // spawn+initialize cycle without unmounting the component.
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    // Gate on Monaco being loaded — providers need Monaco APIs to register.
+    if (!monaco) return;
+
     let cancelled = false;
     let terminated = false;
+    let connection: MessageConnection | null = null;
+    let closeReaderFn: (() => void) | null = null;
+    let providerDisposables: Array<{ dispose(): void }> = [];
+
+    const teardownConnection = () => {
+      for (const d of providerDisposables) d.dispose();
+      providerDisposables = [];
+      closeReaderFn?.();
+      closeReaderFn = null;
+      connection?.dispose();
+      connection = null;
+    };
+
     const reportOnce = (reason: LspClientLoadError, detail?: string) => {
       if (terminated) return;
       terminated = true;
 
-      // Auto-retry on exit: the sidecar may have crashed transiently
-      // (e.g. OOM, permission error on first run). Retry with
-      // exponential backoff before giving up and surfacing the error.
       if (reason === "exit" && retryCount.current < MAX_RETRIES) {
         const delay = INITIAL_BACKOFF_MS * 2 ** retryCount.current;
         retryCount.current += 1;
@@ -113,31 +120,22 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
       onError?.(reason, detail);
     };
 
-    const offMessagePromise = transport.onMessage((message) => {
-      if (cancelled) return;
-      if (message.id !== INITIALIZE_REQUEST_ID) return;
-      if (message.error !== undefined) {
-        const detail = `[${message.error.code}] ${message.error.message}`;
-        console.warn("verde-lsp initialize rejected:", detail, message.error.data);
-        reportOnce("initialize-failed", detail);
-        return;
-      }
-      if (message.result !== undefined) {
-        // Successful handshake — reset the retry counter so future
-        // crashes get a fresh set of retries.
-        retryCount.current = 0;
-        initializedRef.current = true;
-        setReady(true);
-      }
-    });
+    const resolveDocumentUri: RegisterLspProvidersOptions["resolveDocumentUri"] =
+      (modelUri: string) => {
+        if (projectDir) {
+          const parts = modelUri.split("/");
+          const filename = parts[parts.length - 1] || modelUri;
+          return pathToFileUri(`${projectDir}/${filename}`);
+        }
+        return modelUri;
+      };
 
+    // Wire the transport's exit event to tear down and retry.
     const offExitPromise = transport.onExit(() => {
       if (cancelled) return;
-      // Sidecar died — clear the initialized flag so the next
-      // spawn+initialize cycle (retry or manual reload) sends a fresh
-      // handshake to the new process.
       initializedRef.current = false;
       setReady(false);
+      teardownConnection();
       reportOnce("exit");
     });
 
@@ -145,41 +143,77 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
       try {
         if (spawn) await spawn();
         if (cancelled) return;
-        // StrictMode double-invokes effects (mount → unmount → remount).
-        // The sidecar persists across mounts (lsp_spawn is idempotent),
-        // so a second `initialize` would hit an already-initialized
-        // verde-lsp which rejects with -32600 "Invalid request". Skip
-        // the handshake when we know the process was already initialized.
+
+        // StrictMode double-invokes effects. The sidecar persists across
+        // mounts (lsp_spawn is idempotent). Skip handshake when we know
+        // the process was already initialized.
         if (initializedRef.current) {
           setReady(true);
           return;
         }
-        await transport.send({
-          jsonrpc: "2.0",
-          id: INITIALIZE_REQUEST_ID,
-          method: "initialize",
-          params: {
-            processId: null,
-            clientInfo: { name: "Verde", version: "0.1.0" },
-            rootUri: projectDir ? pathToFileUri(projectDir) : null,
-            capabilities: {},
+
+        const transports = createTransports(transport);
+        closeReaderFn = transports.closeReader;
+
+        connection = createMessageConnection(transports.reader, transports.writer);
+        connection.listen();
+
+        const rootUri = projectDir ? pathToFileUri(projectDir) : null;
+
+        await connection.sendRequest("initialize", {
+          processId: null,
+          clientInfo: { name: "Verde", version: "0.1.0" },
+          rootUri,
+          capabilities: {
+            textDocument: {
+              completion: {
+                completionItem: { snippetSupport: false },
+              },
+              hover: { contentFormat: ["markdown", "plaintext"] },
+              publishDiagnostics: { relatedInformation: false },
+            },
           },
         });
+
+        if (cancelled) {
+          teardownConnection();
+          return;
+        }
+
+        // Send `initialized` notification (required by LSP spec after
+        // receiving the initialize response).
+        await connection.sendNotification("initialized", {});
+
+        // Register Monaco providers for completion, hover, diagnostics.
+        providerDisposables = registerLspProviders(
+          monaco,
+          connection,
+          "vba",
+          { resolveDocumentUri },
+        );
+
+        retryCount.current = 0;
+        initializedRef.current = true;
+        setReady(true);
       } catch (err) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
-        reportOnce(
-          msg.includes(LSP_NOT_SPAWNED_SENTINEL) ? "not-spawned" : "spawn-failed",
-        );
+        if (msg.includes(LSP_NOT_SPAWNED_SENTINEL)) {
+          reportOnce("not-spawned");
+        } else if (msg.includes("ServerError") || msg.includes("-32")) {
+          reportOnce("initialize-failed", msg);
+        } else {
+          reportOnce("spawn-failed");
+        }
       }
     })();
 
     return () => {
       cancelled = true;
-      void offMessagePromise.then((off) => off());
+      teardownConnection();
       void offExitPromise.then((off) => off());
     };
-  }, [transport, onError, spawn, projectDir, attempt]);
+  }, [transport, onError, spawn, projectDir, attempt, monaco]);
 
   return { ready };
 }

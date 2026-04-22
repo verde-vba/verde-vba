@@ -1,4 +1,4 @@
-import MonacoEditor from "@monaco-editor/react";
+import MonacoEditor, { useMonaco } from "@monaco-editor/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -51,6 +51,7 @@ export function Editor({
 }: EditorProps) {
   const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const monaco = useMonaco();
 
   // Memoize transport + spawn so the useLspClient effect does not
   // re-run on every render (each render would otherwise unmount/remount
@@ -69,6 +70,7 @@ export function Editor({
     spawn: lspSpawn,
     onError: onLspLoadError,
     projectDir,
+    monaco,
   });
 
   const handleBeforeMount = useCallback(
