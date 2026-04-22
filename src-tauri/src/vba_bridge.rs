@@ -97,9 +97,20 @@ try {
         $wb.VBProject.VBComponents.Remove($existing)
     }
     if ($existing -and $existing.Type -eq 100) {
-        $code = Get-Content $modulePath -Raw
+        $lines = [System.IO.File]::ReadAllLines($modulePath, [System.Text.Encoding]::UTF8)
+        $codeStart = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^Attribute VB_') { $codeStart = $i + 1 }
+        }
+        if ($codeStart -lt $lines.Count) {
+            $code = [string]::Join("`r`n", $lines[$codeStart..($lines.Count - 1)])
+        } else {
+            $code = ''
+        }
         $existing.CodeModule.DeleteLines(1, $existing.CodeModule.CountOfLines)
-        $existing.CodeModule.AddFromString($code)
+        if ($code.Trim().Length -gt 0) {
+            $existing.CodeModule.AddFromString($code)
+        }
     } else {
         $wb.VBProject.VBComponents.Import($modulePath)
     }
