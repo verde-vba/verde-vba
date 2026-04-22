@@ -117,7 +117,7 @@ export function Editor({
   }, [fontSize, tabSize, wordWrap, minimap]);
 
   return (
-    <div style={{ flex: 1, overflow: "hidden" }}>
+    <div style={{ height: "100%", overflow: "hidden" }}>
       <MonacoEditor
         height="100%"
         language={VBA_LANGUAGE_ID}

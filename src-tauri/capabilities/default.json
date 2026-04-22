@@ -14,6 +14,9 @@
       "identifier": "shell:allow-spawn",
       "allow": [{ "name": "verde-lsp", "sidecar": true }]
     },
-    "shell:allow-stdin-write"
+    "shell:allow-stdin-write",
+    "core:window:allow-set-title",
+    "core:window:allow-close",
+    "core:window:allow-destroy"
   ]
 }
