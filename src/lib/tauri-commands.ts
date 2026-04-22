@@ -85,3 +85,11 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }
+
+export async function startFileWatcher(projectDir: string): Promise<void> {
+  return invoke("start_file_watcher", { projectDir });
+}
+
+export async function stopFileWatcher(): Promise<void> {
+  return invoke("stop_file_watcher");
+}

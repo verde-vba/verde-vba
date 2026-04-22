@@ -31,6 +31,8 @@ clap = { version = "4", features = ["derive"] }
 encoding_rs = "0.8"
 hex = "0.4"
 whoami = "1"
+notify = { version = "7", default-features = false }
+notify-debouncer-mini = "0.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

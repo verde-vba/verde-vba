@@ -15,6 +15,7 @@ import { WelcomeScreen } from "./components/WelcomeScreen";
 import { getInitialFile, readModule } from "./lib/tauri-commands";
 import type { ModuleInfo } from "./lib/types";
 import { useErrorRouting } from "./hooks/useErrorRouting";
+import { useFileWatcher } from "./hooks/useFileWatcher";
 import { useModuleTabs } from "./hooks/useModuleTabs";
 import { useOpenFile } from "./hooks/useOpenFile";
 import { useSave } from "./hooks/useSave";
@@ -79,6 +80,32 @@ function App() {
   const buffersRef = useRef(new Map<string, string>());
   const savedContentsRef = useRef(new Map<string, string>());
   const [dirtyModules, setDirtyModules] = useState<ReadonlySet<string>>(new Set());
+  const [fileConflict, setFileConflict] = useState<string | null>(null);
+
+  useFileWatcher({
+    projectId: project?.project_id ?? null,
+    projectDir: project?.project_dir ?? null,
+    activeModuleFilename: activeModule?.filename ?? null,
+    isDirty: (filename) => dirtyModules.has(filename),
+    onReload: (filename, content) => {
+      buffersRef.current.set(filename, content);
+      savedContentsRef.current.set(filename, content);
+      setEditorContent(content);
+      setDirtyModules((prev) => {
+        if (!prev.has(filename)) return prev;
+        const next = new Set(prev);
+        next.delete(filename);
+        return next;
+      });
+    },
+    onConflict: (filename) => {
+      setFileConflict(filename);
+    },
+    onInvalidate: (filename) => {
+      buffersRef.current.delete(filename);
+      savedContentsRef.current.delete(filename);
+    },
+  });
 
   // Restore hot-exit buffers when a project is opened.
   // Runs before the module-load effect so buffersRef is pre-populated.
@@ -363,6 +390,26 @@ function App() {
     void acknowledgeTrust();
   }, [acknowledgeTrust]);
 
+  const handleFileConflictReload = useCallback(async () => {
+    if (!project || !fileConflict) return;
+    try {
+      const content = await readModule(project.project_id, fileConflict);
+      buffersRef.current.set(fileConflict, content);
+      savedContentsRef.current.set(fileConflict, content);
+      if (activeModule?.filename === fileConflict) {
+        setEditorContent(content);
+      }
+      setDirtyModules((prev) => {
+        if (!prev.has(fileConflict)) return prev;
+        const next = new Set(prev);
+        next.delete(fileConflict);
+        return next;
+      });
+    } finally {
+      setFileConflict(null);
+    }
+  }, [project, fileConflict, activeModule]);
+
   const [conflictResolving, setConflictResolving] = useState(false);
   const [conflictError, setConflictError] = useState<string | null>(null);
 
@@ -497,6 +544,32 @@ function App() {
         >
           {t("status.excelOpen")}
           {excelOpenPrompt ? ` (${excelOpenPrompt})` : ""}
+        </Banner>
+      )}
+
+      {fileConflict && (
+        <Banner
+          tone="warning"
+          onDismiss={() => setFileConflict(null)}
+          dismissLabel={t("fileWatcher.keep")}
+        >
+          {t("fileWatcher.conflict", { filename: fileConflict })}{" "}
+          <button
+            type="button"
+            onClick={handleFileConflictReload}
+            style={{
+              padding: "2px 10px",
+              background: "transparent",
+              color: "inherit",
+              border: "1px solid var(--border)",
+              borderRadius: "4px",
+              fontSize: "12px",
+              cursor: "pointer",
+              marginLeft: "8px",
+            }}
+          >
+            {t("fileWatcher.reload")}
+          </button>
         </Banner>
       )}
 

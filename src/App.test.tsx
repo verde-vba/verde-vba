@@ -29,6 +29,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
+// Mock the Tauri event API — useFileWatcher calls listen() to register for
+// file-change events from the Rust backend.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async () => () => {}),
+}));
+
 // Mock the plugin-dialog dynamic import used by App.handleOpenFile so we
 // can bypass the real native file picker and feed a synthetic path in.
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -78,6 +84,15 @@ const defaultSettingsResponse = {
   trust: { vbaAcknowledged: true },
 };
 
+// Commands that fire as side-effects on mount/unmount and are irrelevant
+// to the test assertions. Each mockImplementation should delegate to this
+// before rejecting unknown commands so they don't cause unhandled errors.
+const BACKGROUND_COMMANDS = new Set([
+  "get_initial_file",
+  "start_file_watcher",
+  "stop_file_watcher",
+]);
+
 // Wire the standard "settings load OK + open_project fails" backend, then
 // drive the WelcomeScreen open action and wait for the resulting banner.
 // Returns the banner element so the caller can assert on its content.
@@ -89,6 +104,7 @@ async function renderAppWithOpenError(openError: string) {
     if (cmd === "open_project") {
       return Promise.reject(new Error(openError));
     }
+    if (BACKGROUND_COMMANDS.has(cmd)) return Promise.resolve(null);
     return Promise.reject(new Error(`unexpected command: ${cmd}`));
   });
 
@@ -143,7 +159,8 @@ describe("App error banner", () => {
           new Error("LOCKED:alice:WORKSTATION:2026-04-20T12:00:00Z")
         );
       }
-      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      if (BACKGROUND_COMMANDS.has(cmd)) return Promise.resolve(null);
+    return Promise.reject(new Error(`unexpected command: ${cmd}`));
     });
 
     render(<App />);
@@ -197,7 +214,8 @@ describe("App save blocked", () => {
       if (cmd === "save_module") {
         return Promise.reject(new Error("EXCEL_OPEN: workbook is open"));
       }
-      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      if (BACKGROUND_COMMANDS.has(cmd)) return Promise.resolve(null);
+    return Promise.reject(new Error(`unexpected command: ${cmd}`));
     });
 
     render(<App />);
@@ -276,7 +294,8 @@ describe("App save blocked", () => {
       // checkConflict is called inside the read-only open flow; resolve
       // empty so no ConflictDialog steals the Banner assertion below.
       if (cmd === "check_conflict") return Promise.resolve([]);
-      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      if (BACKGROUND_COMMANDS.has(cmd)) return Promise.resolve(null);
+    return Promise.reject(new Error(`unexpected command: ${cmd}`));
     });
 
     render(<App />);
@@ -334,7 +353,8 @@ describe("App file dialog", () => {
       if (cmd === "get_settings") return Promise.resolve(defaultSettingsResponse);
       // open_project won't be reached because the mocked open() returns null
       // below — but stub it defensively so an unexpected call surfaces clearly.
-      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      if (BACKGROUND_COMMANDS.has(cmd)) return Promise.resolve(null);
+    return Promise.reject(new Error(`unexpected command: ${cmd}`));
     });
     // Returning null short-circuits handleOpenFile after the dialog call,
     // so we only observe the filter args without needing backend plumbing.

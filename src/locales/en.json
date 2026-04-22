@@ -80,6 +80,11 @@
     "minimap": "Minimap",
     "autoSync": "Auto sync to Excel on save"
   },
+  "fileWatcher": {
+    "conflict": "{{filename}} was modified externally. Reload from disk or keep your changes?",
+    "reload": "Reload",
+    "keep": "Keep"
+  },
   "errors": {
     "projectNotFound": {
       "title": "Project not found",

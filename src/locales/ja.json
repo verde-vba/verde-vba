@@ -80,6 +80,11 @@
     "minimap": "ミニマップ",
     "autoSync": "保存時に自動でExcelに同期"
   },
+  "fileWatcher": {
+    "conflict": "{{filename}} が外部で変更されました。再読み込みしますか？",
+    "reload": "再読み込み",
+    "keep": "保持"
+  },
   "errors": {
     "projectNotFound": {
       "title": "プロジェクトが見つかりません",

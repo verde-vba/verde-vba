@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
-use tauri::command;
+use tauri::{command, State};
 
 use crate::conflict::ConflictModuleDto;
+use crate::file_watcher::FileWatcherState;
 use crate::lock::{LockInfo, LockManager};
 use crate::project::{ProjectInfo, ProjectManager};
 use crate::settings::Settings;
@@ -86,7 +87,19 @@ pub async fn read_module(project_id: String, filename: String) -> Result<String,
 }
 
 #[command]
-pub async fn save_module(request: ModuleSaveRequest) -> Result<(), String> {
+pub async fn save_module(
+    request: ModuleSaveRequest,
+    watcher_state: State<'_, FileWatcherState>,
+) -> Result<(), String> {
+    // Suppress the file-changed event for this self-write so the watcher
+    // doesn't echo it back to the frontend.
+    let file_path = ProjectManager::project_dir(&request.project_id).join(&request.filename);
+    watcher_state
+        .suppressed
+        .lock()
+        .expect("suppression mutex poisoned")
+        .insert(file_path);
+
     let manager = ProjectManager::new();
     manager
         .save_module(&request.project_id, &request.filename, &request.content)

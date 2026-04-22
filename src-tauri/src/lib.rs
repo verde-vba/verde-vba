@@ -1,6 +1,7 @@
 pub mod cli;
 mod commands;
 pub mod conflict;
+mod file_watcher;
 mod lock;
 mod lsp_sidecar;
 mod project;
@@ -10,6 +11,7 @@ mod vba_bridge;
 use std::sync::Mutex;
 
 use commands::*;
+use file_watcher::{start_file_watcher, stop_file_watcher, FileWatcherState};
 use lsp_sidecar::{lsp_send, lsp_spawn, LspSidecarState};
 
 /// File path passed via CLI when the OS opens Verde with a file argument
@@ -31,6 +33,7 @@ pub fn run(initial_file: Option<String>) {
         .plugin(tauri_plugin_shell::init())
         .manage(InitialFile(Mutex::new(initial_file)))
         .manage(LspSidecarState::default())
+        .manage(FileWatcherState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -57,6 +60,8 @@ pub fn run(initial_file: Option<String>) {
             save_settings,
             lsp_spawn,
             lsp_send,
+            start_file_watcher,
+            stop_file_watcher,
             get_initial_file,
         ])
         .run(tauri::generate_context!())
