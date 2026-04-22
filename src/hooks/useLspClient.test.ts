@@ -7,6 +7,7 @@
 
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
+import { ResponseError } from "vscode-jsonrpc";
 import type { LspExitPayload, LspTransport } from "../lib/lsp-bridge";
 import { useLspClient, MAX_RETRIES, INITIAL_BACKOFF_MS } from "./useLspClient";
 
@@ -23,9 +24,13 @@ const mockConnection = {
   onError: vi.fn(() => ({ dispose: vi.fn() })),
 };
 
-vi.mock("vscode-jsonrpc", () => ({
-  createMessageConnection: vi.fn(() => mockConnection),
-}));
+vi.mock("vscode-jsonrpc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("vscode-jsonrpc")>();
+  return {
+    ...actual,
+    createMessageConnection: vi.fn(() => mockConnection),
+  };
+});
 
 vi.mock("../lib/lsp-message-transports", () => ({
   createTransports: vi.fn(() => ({
@@ -180,6 +185,48 @@ describe("useLspClient", () => {
         "initialize-failed",
         "[-32603] Internal error",
       ),
+    );
+  });
+
+  it("reports 'initialize-failed' for ResponseError with non -32600 code", async () => {
+    const onError = vi.fn();
+    const transport = makeTransport();
+    mockConnection.sendRequest.mockRejectedValue(
+      new ResponseError(-32603, "Internal error"),
+    );
+
+    renderHook(() =>
+      useLspClient({ transport, onError, monaco: MOCK_MONACO }),
+    );
+
+    await waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(
+        "initialize-failed",
+        "Internal error",
+      ),
+    );
+  });
+
+  it("recovers from -32600 ResponseError (StrictMode duplicate initialize)", async () => {
+    const { registerLspProviders } = await import("../lib/lsp-monaco-providers");
+    const onError = vi.fn();
+    const transport = makeTransport();
+    mockConnection.sendRequest.mockRejectedValue(
+      new ResponseError(-32600, "Invalid request"),
+    );
+
+    const { result } = renderHook(() =>
+      useLspClient({ transport, onError, monaco: MOCK_MONACO }),
+    );
+
+    // Should recover: ready=true, no error reported, providers registered.
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(onError).not.toHaveBeenCalled();
+    expect(registerLspProviders).toHaveBeenCalledWith(
+      MOCK_MONACO,
+      mockConnection,
+      "vba",
+      expect.objectContaining({ resolveDocumentUri: expect.any(Function) }),
     );
   });
 
