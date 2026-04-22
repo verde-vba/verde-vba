@@ -31,6 +31,7 @@ function App() {
   const {
     project,
     activeModule,
+    loading: projectLoading,
     readOnly,
     conflict,
     openProject,
@@ -39,16 +40,20 @@ function App() {
     setActiveModule,
     saveModule,
     resolveConflict,
+    resolveConflictPerModule,
   } = useVerdeProject();
-  const { acknowledged: trustAcknowledged, acknowledge: acknowledgeTrust } =
-    useTrust();
+  const {
+    acknowledged: trustAcknowledged,
+    acknowledge: acknowledgeTrust,
+    reset: resetTrust,
+  } = useTrust();
   const {
     errorBanner,
     setErrorBanner,
     excelOpenPrompt,
     setExcelOpenPrompt,
     routeParsedError,
-  } = useErrorRouting();
+  } = useErrorRouting({ onTrustAccessDenied: resetTrust });
   const { openModules, handleSelectModule, handleCloseModule } = useModuleTabs({
     activeModule,
     setActiveModule,
@@ -67,7 +72,7 @@ function App() {
     routeParsedError,
     fileTypeLabel: t("common.fileTypeExcelMacro"),
   });
-  const { saveBlockedPrompt, setSaveBlockedPrompt, handleSave } = useSave({
+  const { saveBlockedPrompt, setSaveBlockedPrompt, handleSave, isSaving } = useSave({
     activeModule,
     saveModule,
     setExcelOpenPrompt,
@@ -437,6 +442,21 @@ function App() {
     }
   }, [resolveConflict]);
 
+  const handleResolvePerModule = useCallback(
+    async (decisions: Record<string, "verde" | "excel">) => {
+      setConflictResolving(true);
+      setConflictError(null);
+      try {
+        await resolveConflictPerModule(decisions);
+      } catch (e) {
+        setConflictError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setConflictResolving(false);
+      }
+    },
+    [resolveConflictPerModule]
+  );
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -464,6 +484,7 @@ function App() {
               {activeModule ? (
                 <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
                 {moduleLoading && <Loader />}
+                {isSaving && <Loader message={t("editor.saving")} />}
                 <Editor
                   filename={activeModule.filename}
                   content={editorContent}
@@ -495,9 +516,24 @@ function App() {
                 />
                 </div>
               ) : (
-                <WelcomeScreen onOpenFile={handleOpenFile} />
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--text-secondary)",
+                    fontSize: "14px",
+                  }}
+                >
+                  {t("editor.noEditorOpen")}
+                </div>
               )}
             </>
+          ) : projectLoading ? (
+            <div style={{ flex: 1, position: "relative" }}>
+              <Loader />
+            </div>
           ) : (
             <WelcomeScreen onOpenFile={handleOpenFile} />
           )}
@@ -598,14 +634,18 @@ function App() {
         />
       )}
 
-      {conflict != null && (
+      {conflict != null && project != null && (
         <ConflictDialog
+          projectId={conflict.projectId}
+          xlsmPath={project.xlsm_path}
           count={conflict.modules.length}
           modules={conflict.modules}
           resolving={conflictResolving}
           error={conflictError}
+          theme={resolved}
           onKeepFile={handleKeepFile}
           onKeepExcel={handleKeepExcel}
+          onResolvePerModule={handleResolvePerModule}
         />
       )}
 

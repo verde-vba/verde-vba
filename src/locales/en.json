@@ -37,7 +37,13 @@
     "title": "Conflict detected",
     "message": "{{count}} module(s) have been modified in both Verde and Excel.",
     "keepFile": "Keep Verde version",
-    "keepExcel": "Keep Excel version"
+    "keepExcel": "Keep Excel version",
+    "resolve": "Resolve",
+    "verde": "Verde",
+    "excel": "Excel",
+    "loadingDiff": "Loading diff…",
+    "diffError": "Failed to load diff",
+    "clickToCompare": "Click a module to compare"
   },
   "saveConfirm": {
     "title": "Unsaved Changes",
@@ -59,7 +65,10 @@
     "openPrompt": "Open .xlsm file to get started",
     "rightClickTip": "Tip: Right-click any .xlsm file → Open with Verde",
     "saveAction": "Save",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "projectLoading": "Opening project…",
+    "noEditorOpen": "Select a module from the sidebar to start editing"
   },
   "outline": {
     "title": "Outline"
