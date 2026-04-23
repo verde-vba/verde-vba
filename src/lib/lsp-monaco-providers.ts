@@ -52,6 +52,60 @@ interface LspPublishDiagnosticsParams {
   uri: string;
   diagnostics: LspDiagnostic[];
 }
+interface LspLocation {
+  uri: string;
+  range: LspRange;
+}
+interface LspTextEdit {
+  range: LspRange;
+  newText: string;
+}
+interface LspWorkspaceEdit {
+  changes?: Record<string, LspTextEdit[]>;
+}
+interface LspPrepareRenameResult {
+  range: LspRange;
+  placeholder: string;
+}
+interface LspSignatureHelp {
+  signatures: LspSignatureInformation[];
+  activeSignature?: number;
+  activeParameter?: number;
+}
+interface LspSignatureInformation {
+  label: string;
+  documentation?: string | { kind: string; value: string };
+  parameters?: LspParameterInformation[];
+}
+interface LspParameterInformation {
+  label: string | [number, number];
+  documentation?: string | { kind: string; value: string };
+}
+interface LspDocumentHighlight {
+  range: LspRange;
+  kind?: number;
+}
+interface LspDocumentSymbol {
+  name: string;
+  detail?: string;
+  kind: number;
+  range: LspRange;
+  selectionRange: LspRange;
+  children?: LspDocumentSymbol[];
+}
+interface LspCodeAction {
+  title: string;
+  kind?: string;
+  edit?: LspWorkspaceEdit;
+  isPreferred?: boolean;
+}
+interface LspInlayHint {
+  position: LspPosition;
+  label: string | Array<{ value: string }>;
+  kind?: number;
+  paddingLeft?: boolean;
+  paddingRight?: boolean;
+}
 
 // ── Monaco type aliases ──────────────────────────────────────────
 // Using `typeof import("monaco-editor")` as the Monaco namespace.
@@ -216,6 +270,168 @@ export function toMonacoMarker(diag: LspDiagnostic): {
   };
 }
 
+// ── Definition converter ────────────────────────────────────────
+
+/** LSP Location | Location[] | null → Monaco definition array. */
+export function toMonacoDefinition(
+  result: LspLocation | LspLocation[] | null,
+): Array<{ uri: string; range: import("monaco-editor").IRange }> {
+  if (!result) return [];
+  const locations = Array.isArray(result) ? result : [result];
+  return locations.map((loc) => ({
+    uri: loc.uri,
+    range: toMonacoRange(loc.range),
+  }));
+}
+
+// ── WorkspaceEdit converter ─────────────────────────────────────
+
+/** LSP WorkspaceEdit → Monaco-compatible workspace edit. */
+export function toMonacoWorkspaceEdit(
+  edit: LspWorkspaceEdit,
+): {
+  edits: Array<{
+    resource: string;
+    textEdit: { range: import("monaco-editor").IRange; text: string };
+    versionId: undefined;
+  }>;
+} {
+  const edits: Array<{
+    resource: string;
+    textEdit: { range: import("monaco-editor").IRange; text: string };
+    versionId: undefined;
+  }> = [];
+
+  for (const [uri, textEdits] of Object.entries(edit.changes ?? {})) {
+    for (const te of textEdits) {
+      edits.push({
+        resource: uri,
+        textEdit: { range: toMonacoRange(te.range), text: te.newText },
+        versionId: undefined,
+      });
+    }
+  }
+
+  return { edits };
+}
+
+// ── SymbolKind mapping ──────────────────────────────────────────
+// LSP SymbolKind is 1-based; Monaco SymbolKind is 0-based.
+
+export function toMonacoSymbolKind(lspKind: number): number {
+  return lspKind - 1;
+}
+
+// ── DocumentHighlightKind mapping ───────────────────────────────
+// LSP: 1=Text 2=Read 3=Write → Monaco: 0=Text 1=Read 2=Write
+
+export function toMonacoDocumentHighlightKind(lspKind: number | undefined): number {
+  if (lspKind === undefined) return 0; // Text
+  return lspKind - 1;
+}
+
+// ── SignatureHelp converter ─────────────────────────────────────
+
+function normalizeDocumentation(
+  doc: string | { kind: string; value: string } | undefined,
+): string | { value: string } | undefined {
+  if (doc === undefined) return undefined;
+  if (typeof doc === "string") return doc;
+  return { value: doc.value };
+}
+
+export function toMonacoSignatureHelp(help: LspSignatureHelp): {
+  value: {
+    signatures: Array<{
+      label: string;
+      documentation?: string | { value: string };
+      parameters: Array<{
+        label: string | [number, number];
+        documentation?: string | { value: string };
+      }>;
+    }>;
+    activeSignature: number;
+    activeParameter: number;
+  };
+  dispose(): void;
+} {
+  return {
+    value: {
+      signatures: help.signatures.map((sig) => ({
+        label: sig.label,
+        documentation: normalizeDocumentation(sig.documentation),
+        parameters: (sig.parameters ?? []).map((p) => ({
+          label: p.label,
+          documentation: normalizeDocumentation(p.documentation),
+        })),
+      })),
+      activeSignature: help.activeSignature ?? 0,
+      activeParameter: help.activeParameter ?? 0,
+    },
+    dispose() {},
+  };
+}
+
+// ── DocumentHighlight converter ─────────────────────────────────
+
+export function toMonacoDocumentHighlight(highlight: LspDocumentHighlight): {
+  range: import("monaco-editor").IRange;
+  kind: number;
+} {
+  return {
+    range: toMonacoRange(highlight.range),
+    kind: toMonacoDocumentHighlightKind(highlight.kind),
+  };
+}
+
+// ── DocumentSymbol converter ────────────────────────────────────
+
+type MonacoDocumentSymbol = {
+  name: string;
+  detail: string;
+  kind: number;
+  tags: readonly never[];
+  range: import("monaco-editor").IRange;
+  selectionRange: import("monaco-editor").IRange;
+  children?: MonacoDocumentSymbol[];
+};
+
+export function toMonacoDocumentSymbol(symbol: LspDocumentSymbol): MonacoDocumentSymbol {
+  return {
+    name: symbol.name,
+    detail: symbol.detail ?? "",
+    kind: toMonacoSymbolKind(symbol.kind),
+    tags: [],
+    range: toMonacoRange(symbol.range),
+    selectionRange: toMonacoRange(symbol.selectionRange),
+    children: symbol.children?.map(toMonacoDocumentSymbol),
+  };
+}
+
+// ── InlayHint converter ─────────────────────────────────────────
+
+export function toMonacoInlayHint(hint: LspInlayHint): {
+  label: string;
+  position: { lineNumber: number; column: number };
+  kind?: number;
+  paddingLeft?: boolean;
+  paddingRight?: boolean;
+} {
+  const label = typeof hint.label === "string"
+    ? hint.label
+    : hint.label.map((p) => p.value).join("");
+  return {
+    label,
+    position: {
+      lineNumber: hint.position.line + 1,
+      column: hint.position.character + 1,
+    },
+    kind: hint.kind,
+    paddingLeft: hint.paddingLeft,
+    paddingRight: hint.paddingRight,
+  };
+}
+
 // ── Provider registration ────────────────────────────────────────
 
 export interface RegisterLspProvidersOptions {
@@ -294,6 +510,295 @@ export function registerLspProviders(
           return toMonacoHover(result);
         } catch {
           return null;
+        }
+      },
+    }),
+  );
+
+  // ── Definition ──
+  disposables.push(
+    monaco.languages.registerDefinitionProvider(languageId, {
+      provideDefinition: async (model, position) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<
+            LspLocation | LspLocation[] | null
+          >("textDocument/definition", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+          });
+
+          const defs = toMonacoDefinition(result);
+          return defs.map((d) => ({
+            uri: monaco.Uri.parse(d.uri),
+            range: d.range,
+          }));
+        } catch {
+          return [];
+        }
+      },
+    }),
+  );
+
+  // ── Rename ──
+  disposables.push(
+    monaco.languages.registerRenameProvider(languageId, {
+      provideRenameEdits: async (model, position, newName) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspWorkspaceEdit | null>(
+            "textDocument/rename",
+            {
+              textDocument: { uri: docUri },
+              position: toLspPosition(position),
+              newName,
+            },
+          );
+
+          if (!result) return null;
+          const wsEdit = toMonacoWorkspaceEdit(result);
+          return {
+            edits: wsEdit.edits.map((e) => ({
+              ...e,
+              resource: monaco.Uri.parse(e.resource),
+            })),
+          };
+        } catch {
+          return null;
+        }
+      },
+      resolveRenameLocation: async (model, position) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspPrepareRenameResult | null>(
+            "textDocument/prepareRename",
+            {
+              textDocument: { uri: docUri },
+              position: toLspPosition(position),
+            },
+          );
+
+          if (!result) return null;
+          return {
+            range: toMonacoRange(result.range),
+            text: result.placeholder,
+          };
+        } catch {
+          return null;
+        }
+      },
+    }),
+  );
+
+  // ── Signature Help ──
+  disposables.push(
+    monaco.languages.registerSignatureHelpProvider(languageId, {
+      signatureHelpTriggerCharacters: ["(", ","],
+      provideSignatureHelp: async (model, position) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspSignatureHelp | null>(
+            "textDocument/signatureHelp",
+            {
+              textDocument: { uri: docUri },
+              position: toLspPosition(position),
+            },
+          );
+
+          if (!result) return null;
+          return toMonacoSignatureHelp(result);
+        } catch {
+          return null;
+        }
+      },
+    }),
+  );
+
+  // ── References ──
+  disposables.push(
+    monaco.languages.registerReferenceProvider(languageId, {
+      provideReferences: async (model, position) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspLocation[] | null>(
+            "textDocument/references",
+            {
+              textDocument: { uri: docUri },
+              position: toLspPosition(position),
+              context: { includeDeclaration: true },
+            },
+          );
+
+          if (!result) return [];
+          return result.map((loc) => ({
+            uri: monaco.Uri.parse(loc.uri),
+            range: toMonacoRange(loc.range),
+          }));
+        } catch {
+          return [];
+        }
+      },
+    }),
+  );
+
+  // ── Document Symbol ──
+  disposables.push(
+    monaco.languages.registerDocumentSymbolProvider(languageId, {
+      provideDocumentSymbols: async (model) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspDocumentSymbol[] | null>(
+            "textDocument/documentSymbol",
+            { textDocument: { uri: docUri } },
+          );
+
+          if (!result) return [];
+          return result.map(toMonacoDocumentSymbol);
+        } catch {
+          return [];
+        }
+      },
+    }),
+  );
+
+  // ── Document Highlight ──
+  disposables.push(
+    monaco.languages.registerDocumentHighlightProvider(languageId, {
+      provideDocumentHighlights: async (model, position) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspDocumentHighlight[] | null>(
+            "textDocument/documentHighlight",
+            {
+              textDocument: { uri: docUri },
+              position: toLspPosition(position),
+            },
+          );
+
+          if (!result) return [];
+          return result.map(toMonacoDocumentHighlight);
+        } catch {
+          return [];
+        }
+      },
+    }),
+  );
+
+  // ── Code Action ──
+  disposables.push(
+    monaco.languages.registerCodeActionProvider(languageId, {
+      provideCodeActions: async (model, range) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspCodeAction[] | null>(
+            "textDocument/codeAction",
+            {
+              textDocument: { uri: docUri },
+              range: {
+                start: toLspPosition({
+                  lineNumber: range.startLineNumber,
+                  column: range.startColumn,
+                }),
+                end: toLspPosition({
+                  lineNumber: range.endLineNumber,
+                  column: range.endColumn,
+                }),
+              },
+              context: { diagnostics: [] },
+            },
+          );
+
+          if (!result) return { actions: [], dispose() {} };
+          const actions = result.map((action) => ({
+            title: action.title,
+            kind: action.kind,
+            isPreferred: action.isPreferred,
+            edit: action.edit
+              ? {
+                  edits: toMonacoWorkspaceEdit(action.edit).edits.map((e) => ({
+                    ...e,
+                    resource: monaco.Uri.parse(e.resource),
+                  })),
+                }
+              : undefined,
+          }));
+          return { actions, dispose() {} };
+        } catch {
+          return { actions: [], dispose() {} };
+        }
+      },
+    }),
+  );
+
+  // ── Document Formatting ──
+  disposables.push(
+    monaco.languages.registerDocumentFormattingEditProvider(languageId, {
+      provideDocumentFormattingEdits: async (model, options) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspTextEdit[] | null>(
+            "textDocument/formatting",
+            {
+              textDocument: { uri: docUri },
+              options: {
+                tabSize: options.tabSize,
+                insertSpaces: options.insertSpaces,
+              },
+            },
+          );
+
+          if (!result) return [];
+          return result.map((te) => ({
+            range: toMonacoRange(te.range),
+            text: te.newText,
+          }));
+        } catch {
+          return [];
+        }
+      },
+    }),
+  );
+
+  // ── Inlay Hints ──
+  disposables.push(
+    monaco.languages.registerInlayHintsProvider(languageId, {
+      provideInlayHints: async (model, range) => {
+        const docUri = resolveDocumentUri(model.uri.toString());
+
+        try {
+          const result = await connection.sendRequest<LspInlayHint[] | null>(
+            "textDocument/inlayHint",
+            {
+              textDocument: { uri: docUri },
+              range: {
+                start: toLspPosition({
+                  lineNumber: range.startLineNumber,
+                  column: range.startColumn,
+                }),
+                end: toLspPosition({
+                  lineNumber: range.endLineNumber,
+                  column: range.endColumn,
+                }),
+              },
+            },
+          );
+
+          if (!result) return { hints: [], dispose() {} };
+          return {
+            hints: result.map(toMonacoInlayHint),
+            dispose() {},
+          };
+        } catch {
+          return { hints: [], dispose() {} };
         }
       },
     }),
