@@ -217,25 +217,11 @@ pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Res
         }
     });
 
-    // Brief alive check — yield to let the async reader task detect an
-    // immediate exit. If the sidecar died between spawn() and now, the
-    // Terminated event is already queued in rx and the task will call
-    // clear_child(), setting the slot to None. We use spawn_blocking to
-    // sleep without adding tokio as a direct dependency.
-    eprintln!("[lsp_sidecar] alive check — sleeping 50ms");
-    tauri::async_runtime::spawn_blocking(|| {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    })
-    .await
-    .map_err(|e| format!("alive check failed: {e}"))?;
-    {
-        let guard = state.child.lock().expect("lsp sidecar mutex poisoned");
-        if guard.is_none() {
-            eprintln!("[lsp_sidecar] alive check FAILED — child is None after 50ms");
-            return Err("sidecar exited immediately after spawn".to_string());
-        }
-    }
-    eprintln!("[lsp_sidecar] alive check passed — sidecar is running");
+    // Immediate-exit detection is handled by the frontend's onExit
+    // event handler (useLspClient retry logic). No need to sleep here —
+    // the async reader task above will emit lsp://exit if the sidecar
+    // dies, and the frontend will retry with exponential backoff.
+    eprintln!("[lsp_sidecar] spawn complete — sidecar is running");
 
     Ok(())
 }
