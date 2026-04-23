@@ -667,6 +667,7 @@ describe("registerLspProviders", () => {
         textDocument: { uri: "file:///C:/project/Module1.bas" },
         position: { line: 5, character: 10 },
       },
+      expect.anything(),
     );
     expect(result.suggestions).toHaveLength(1);
     expect(result.suggestions[0]).toMatchObject({
@@ -704,7 +705,7 @@ describe("registerLspProviders", () => {
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/hover", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       position: { line: 5, character: 1 },
-    });
+    }, expect.anything());
     expect(result).toMatchObject({
       contents: [{ value: "```vba\nSub Foo()\n```" }],
       range: { startLineNumber: 6, startColumn: 1, endLineNumber: 6, endColumn: 4 },
@@ -739,7 +740,7 @@ describe("registerLspProviders", () => {
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/definition", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       position: { line: 5, character: 1 },
-    });
+    }, expect.anything());
     expect(result).toEqual([
       {
         uri: expect.objectContaining({ toString: expect.any(Function) }),
@@ -788,7 +789,7 @@ describe("registerLspProviders", () => {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       position: { line: 2, character: 4 },
       newName: "newName",
-    });
+    }, expect.anything());
     expect(result).toBeTruthy();
     expect(result!.edits).toHaveLength(1);
     expect(result!.edits[0]).toMatchObject({
@@ -831,7 +832,7 @@ describe("registerLspProviders", () => {
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/prepareRename", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       position: { line: 2, character: 4 },
-    });
+    }, expect.anything());
     expect(result).toEqual({
       range: { startLineNumber: 3, startColumn: 5, endLineNumber: 3, endColumn: 11 },
       text: "oldName",
@@ -875,7 +876,7 @@ describe("registerLspProviders", () => {
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/signatureHelp", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       position: { line: 2, character: 7 },
-    });
+    }, expect.anything());
     expect(result.value.signatures).toHaveLength(1);
   });
 
@@ -915,6 +916,7 @@ describe("registerLspProviders", () => {
         textDocument: { uri: "file:///C:/project/Module1.bas" },
         position: { line: 2, character: 4 },
       }),
+      expect.anything(),
     );
     expect(result).toHaveLength(2);
   });
@@ -947,7 +949,7 @@ describe("registerLspProviders", () => {
 
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/documentSymbol", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
-    });
+    }, expect.anything());
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ name: "MySub", kind: 5 });
   });
@@ -986,7 +988,7 @@ describe("registerLspProviders", () => {
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/documentHighlight", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       position: { line: 2, character: 4 },
-    });
+    }, expect.anything());
     expect(result).toHaveLength(2);
     expect(result[0].kind).toBe(1); // Monaco Read
     expect(result[1].kind).toBe(2); // Monaco Write
@@ -1036,6 +1038,7 @@ describe("registerLspProviders", () => {
       expect.objectContaining({
         textDocument: { uri: "file:///C:/project/Module1.bas" },
       }),
+      expect.anything(),
     );
     expect(result.actions).toHaveLength(1);
     expect(result.actions[0].title).toBe("Add Option Explicit");
@@ -1074,7 +1077,7 @@ describe("registerLspProviders", () => {
     expect(connection.sendRequest).toHaveBeenCalledWith("textDocument/formatting", {
       textDocument: { uri: "file:///C:/project/Module1.bas" },
       options: { tabSize: 4, insertSpaces: true },
-    });
+    }, expect.anything());
     expect(result).toHaveLength(1);
     expect(result[0].text).toBe("    ");
   });
@@ -1115,6 +1118,7 @@ describe("registerLspProviders", () => {
       expect.objectContaining({
         textDocument: { uri: "file:///C:/project/Module1.bas" },
       }),
+      expect.anything(),
     );
     expect(result.hints).toHaveLength(1);
     expect(result.hints[0].label).toBe(": Long");

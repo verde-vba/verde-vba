@@ -10,6 +10,7 @@
 // service and returns disposables for cleanup.
 
 import type { MessageConnection } from "vscode-jsonrpc";
+import { CancellationTokenSource } from "vscode-jsonrpc";
 
 // ── LSP types (minimal, inline) ──────────────────────────────────
 // We define only what we consume rather than importing from
@@ -113,6 +114,43 @@ interface LspInlayHint {
 type Monaco = typeof import("monaco-editor");
 type IDisposable = import("monaco-editor").IDisposable;
 type IPosition = import("monaco-editor").IPosition;
+
+// ── Request timeout helper ──────────────────────────────────────
+
+/** Default timeout for LSP requests from Monaco providers (ms). */
+const REQUEST_TIMEOUT_MS = 5_000;
+
+/**
+ * Send an LSP request with a timeout. Returns `null` if the request
+ * times out or is cancelled. Uses a CancellationTokenSource that fires
+ * after `timeoutMs` and also respects Monaco's cancellation token (if
+ * supplied) by racing against it.
+ */
+async function sendRequestWithTimeout<T>(
+  connection: MessageConnection,
+  method: string,
+  params: unknown,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+  monacoToken?: import("monaco-editor").CancellationToken,
+): Promise<T | null> {
+  const cts = new CancellationTokenSource();
+  const timer = setTimeout(() => cts.cancel(), timeoutMs);
+
+  // If Monaco signals cancellation (e.g. cursor moved), cancel the LSP
+  // request too.
+  const monacoDisposable = monacoToken?.onCancellationRequested(() => cts.cancel());
+
+  try {
+    const result = await connection.sendRequest<T>(method, params, cts.token);
+    return result;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    monacoDisposable?.dispose();
+    cts.dispose();
+  }
+}
 
 // ── Position / Range converters ──────────────────────────────────
 
@@ -458,7 +496,7 @@ export function registerLspProviders(
   disposables.push(
     monaco.languages.registerCompletionItemProvider(languageId, {
       triggerCharacters: ["."],
-      provideCompletionItems: async (model, position) => {
+      provideCompletionItems: async (model, position, _ctx, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
         const wordInfo = model.getWordUntilPosition(position);
         const replaceRange: import("monaco-editor").IRange = {
@@ -468,25 +506,21 @@ export function registerLspProviders(
           endColumn: wordInfo.endColumn,
         };
 
-        try {
-          const result = await connection.sendRequest<
-            LspCompletionList | LspCompletionItem[] | null
-          >("textDocument/completion", {
-            textDocument: { uri: docUri },
-            position: toLspPosition(position),
-          });
+        const result = await sendRequestWithTimeout<
+          LspCompletionList | LspCompletionItem[] | null
+        >(connection, "textDocument/completion", {
+          textDocument: { uri: docUri },
+          position: toLspPosition(position),
+        }, REQUEST_TIMEOUT_MS, token);
 
-          if (!result) return { suggestions: [] };
+        if (!result) return { suggestions: [] };
 
-          const items = Array.isArray(result) ? result : result.items;
-          return {
-            suggestions: items.map((item) =>
-              toMonacoCompletionItem(item, replaceRange),
-            ),
-          };
-        } catch {
-          return { suggestions: [] };
-        }
+        const items = Array.isArray(result) ? result : result.items;
+        return {
+          suggestions: items.map((item) =>
+            toMonacoCompletionItem(item, replaceRange),
+          ),
+        };
       },
     }),
   );
@@ -494,23 +528,18 @@ export function registerLspProviders(
   // ── Hover ──
   disposables.push(
     monaco.languages.registerHoverProvider(languageId, {
-      provideHover: async (model, position) => {
+      provideHover: async (model, position, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspHover | null>(
-            "textDocument/hover",
-            {
-              textDocument: { uri: docUri },
-              position: toLspPosition(position),
-            },
-          );
+        const result = await sendRequestWithTimeout<LspHover | null>(
+          connection, "textDocument/hover", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return null;
-          return toMonacoHover(result);
-        } catch {
-          return null;
-        }
+        if (!result) return null;
+        return toMonacoHover(result);
       },
     }),
   );
@@ -518,25 +547,22 @@ export function registerLspProviders(
   // ── Definition ──
   disposables.push(
     monaco.languages.registerDefinitionProvider(languageId, {
-      provideDefinition: async (model, position) => {
+      provideDefinition: async (model, position, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<
-            LspLocation | LspLocation[] | null
-          >("textDocument/definition", {
-            textDocument: { uri: docUri },
-            position: toLspPosition(position),
-          });
+        const result = await sendRequestWithTimeout<
+          LspLocation | LspLocation[] | null
+        >(connection, "textDocument/definition", {
+          textDocument: { uri: docUri },
+          position: toLspPosition(position),
+        }, REQUEST_TIMEOUT_MS, token);
 
-          const defs = toMonacoDefinition(result);
-          return defs.map((d) => ({
-            uri: monaco.Uri.parse(d.uri),
-            range: d.range,
-          }));
-        } catch {
-          return [];
-        }
+        if (!result) return [];
+        const defs = toMonacoDefinition(result);
+        return defs.map((d) => ({
+          uri: monaco.Uri.parse(d.uri),
+          range: d.range,
+        }));
       },
     }),
   );
@@ -544,51 +570,41 @@ export function registerLspProviders(
   // ── Rename ──
   disposables.push(
     monaco.languages.registerRenameProvider(languageId, {
-      provideRenameEdits: async (model, position, newName) => {
+      provideRenameEdits: async (model, position, newName, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspWorkspaceEdit | null>(
-            "textDocument/rename",
-            {
-              textDocument: { uri: docUri },
-              position: toLspPosition(position),
-              newName,
-            },
-          );
+        const result = await sendRequestWithTimeout<LspWorkspaceEdit | null>(
+          connection, "textDocument/rename", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+            newName,
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return null;
-          const wsEdit = toMonacoWorkspaceEdit(result);
-          return {
-            edits: wsEdit.edits.map((e) => ({
-              ...e,
-              resource: monaco.Uri.parse(e.resource),
-            })),
-          };
-        } catch {
-          return null;
-        }
+        if (!result) return null;
+        const wsEdit = toMonacoWorkspaceEdit(result);
+        return {
+          edits: wsEdit.edits.map((e) => ({
+            ...e,
+            resource: monaco.Uri.parse(e.resource),
+          })),
+        };
       },
-      resolveRenameLocation: async (model, position) => {
+      resolveRenameLocation: async (model, position, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspPrepareRenameResult | null>(
-            "textDocument/prepareRename",
-            {
-              textDocument: { uri: docUri },
-              position: toLspPosition(position),
-            },
-          );
+        const result = await sendRequestWithTimeout<LspPrepareRenameResult | null>(
+          connection, "textDocument/prepareRename", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return null;
-          return {
-            range: toMonacoRange(result.range),
-            text: result.placeholder,
-          };
-        } catch {
-          return null;
-        }
+        if (!result) return null;
+        return {
+          range: toMonacoRange(result.range),
+          text: result.placeholder,
+        };
       },
     }),
   );
@@ -597,23 +613,18 @@ export function registerLspProviders(
   disposables.push(
     monaco.languages.registerSignatureHelpProvider(languageId, {
       signatureHelpTriggerCharacters: ["(", ","],
-      provideSignatureHelp: async (model, position) => {
+      provideSignatureHelp: async (model, position, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspSignatureHelp | null>(
-            "textDocument/signatureHelp",
-            {
-              textDocument: { uri: docUri },
-              position: toLspPosition(position),
-            },
-          );
+        const result = await sendRequestWithTimeout<LspSignatureHelp | null>(
+          connection, "textDocument/signatureHelp", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return null;
-          return toMonacoSignatureHelp(result);
-        } catch {
-          return null;
-        }
+        if (!result) return null;
+        return toMonacoSignatureHelp(result);
       },
     }),
   );
@@ -621,27 +632,22 @@ export function registerLspProviders(
   // ── References ──
   disposables.push(
     monaco.languages.registerReferenceProvider(languageId, {
-      provideReferences: async (model, position) => {
+      provideReferences: async (model, position, _ctx, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspLocation[] | null>(
-            "textDocument/references",
-            {
-              textDocument: { uri: docUri },
-              position: toLspPosition(position),
-              context: { includeDeclaration: true },
-            },
-          );
+        const result = await sendRequestWithTimeout<LspLocation[] | null>(
+          connection, "textDocument/references", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+            context: { includeDeclaration: true },
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return [];
-          return result.map((loc) => ({
-            uri: monaco.Uri.parse(loc.uri),
-            range: toMonacoRange(loc.range),
-          }));
-        } catch {
-          return [];
-        }
+        if (!result) return [];
+        return result.map((loc) => ({
+          uri: monaco.Uri.parse(loc.uri),
+          range: toMonacoRange(loc.range),
+        }));
       },
     }),
   );
@@ -649,20 +655,17 @@ export function registerLspProviders(
   // ── Document Symbol ──
   disposables.push(
     monaco.languages.registerDocumentSymbolProvider(languageId, {
-      provideDocumentSymbols: async (model) => {
+      provideDocumentSymbols: async (model, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspDocumentSymbol[] | null>(
-            "textDocument/documentSymbol",
-            { textDocument: { uri: docUri } },
-          );
+        const result = await sendRequestWithTimeout<LspDocumentSymbol[] | null>(
+          connection, "textDocument/documentSymbol",
+          { textDocument: { uri: docUri } },
+          REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return [];
-          return result.map(toMonacoDocumentSymbol);
-        } catch {
-          return [];
-        }
+        if (!result) return [];
+        return result.map(toMonacoDocumentSymbol);
       },
     }),
   );
@@ -670,23 +673,18 @@ export function registerLspProviders(
   // ── Document Highlight ──
   disposables.push(
     monaco.languages.registerDocumentHighlightProvider(languageId, {
-      provideDocumentHighlights: async (model, position) => {
+      provideDocumentHighlights: async (model, position, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspDocumentHighlight[] | null>(
-            "textDocument/documentHighlight",
-            {
-              textDocument: { uri: docUri },
-              position: toLspPosition(position),
-            },
-          );
+        const result = await sendRequestWithTimeout<LspDocumentHighlight[] | null>(
+          connection, "textDocument/documentHighlight", {
+            textDocument: { uri: docUri },
+            position: toLspPosition(position),
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return [];
-          return result.map(toMonacoDocumentHighlight);
-        } catch {
-          return [];
-        }
+        if (!result) return [];
+        return result.map(toMonacoDocumentHighlight);
       },
     }),
   );
@@ -694,46 +692,41 @@ export function registerLspProviders(
   // ── Code Action ──
   disposables.push(
     monaco.languages.registerCodeActionProvider(languageId, {
-      provideCodeActions: async (model, range) => {
+      provideCodeActions: async (model, range, _ctx, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspCodeAction[] | null>(
-            "textDocument/codeAction",
-            {
-              textDocument: { uri: docUri },
-              range: {
-                start: toLspPosition({
-                  lineNumber: range.startLineNumber,
-                  column: range.startColumn,
-                }),
-                end: toLspPosition({
-                  lineNumber: range.endLineNumber,
-                  column: range.endColumn,
-                }),
-              },
-              context: { diagnostics: [] },
+        const result = await sendRequestWithTimeout<LspCodeAction[] | null>(
+          connection, "textDocument/codeAction", {
+            textDocument: { uri: docUri },
+            range: {
+              start: toLspPosition({
+                lineNumber: range.startLineNumber,
+                column: range.startColumn,
+              }),
+              end: toLspPosition({
+                lineNumber: range.endLineNumber,
+                column: range.endColumn,
+              }),
             },
-          );
+            context: { diagnostics: [] },
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return { actions: [], dispose() {} };
-          const actions = result.map((action) => ({
-            title: action.title,
-            kind: action.kind,
-            isPreferred: action.isPreferred,
-            edit: action.edit
-              ? {
-                  edits: toMonacoWorkspaceEdit(action.edit).edits.map((e) => ({
-                    ...e,
-                    resource: monaco.Uri.parse(e.resource),
-                  })),
-                }
-              : undefined,
-          }));
-          return { actions, dispose() {} };
-        } catch {
-          return { actions: [], dispose() {} };
-        }
+        if (!result) return { actions: [], dispose() {} };
+        const actions = result.map((action) => ({
+          title: action.title,
+          kind: action.kind,
+          isPreferred: action.isPreferred,
+          edit: action.edit
+            ? {
+                edits: toMonacoWorkspaceEdit(action.edit).edits.map((e) => ({
+                  ...e,
+                  resource: monaco.Uri.parse(e.resource),
+                })),
+              }
+            : undefined,
+        }));
+        return { actions, dispose() {} };
       },
     }),
   );
@@ -741,29 +734,24 @@ export function registerLspProviders(
   // ── Document Formatting ──
   disposables.push(
     monaco.languages.registerDocumentFormattingEditProvider(languageId, {
-      provideDocumentFormattingEdits: async (model, options) => {
+      provideDocumentFormattingEdits: async (model, options, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspTextEdit[] | null>(
-            "textDocument/formatting",
-            {
-              textDocument: { uri: docUri },
-              options: {
-                tabSize: options.tabSize,
-                insertSpaces: options.insertSpaces,
-              },
+        const result = await sendRequestWithTimeout<LspTextEdit[] | null>(
+          connection, "textDocument/formatting", {
+            textDocument: { uri: docUri },
+            options: {
+              tabSize: options.tabSize,
+              insertSpaces: options.insertSpaces,
             },
-          );
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return [];
-          return result.map((te) => ({
-            range: toMonacoRange(te.range),
-            text: te.newText,
-          }));
-        } catch {
-          return [];
-        }
+        if (!result) return [];
+        return result.map((te) => ({
+          range: toMonacoRange(te.range),
+          text: te.newText,
+        }));
       },
     }),
   );
@@ -771,35 +759,30 @@ export function registerLspProviders(
   // ── Inlay Hints ──
   disposables.push(
     monaco.languages.registerInlayHintsProvider(languageId, {
-      provideInlayHints: async (model, range) => {
+      provideInlayHints: async (model, range, token) => {
         const docUri = resolveDocumentUri(model.uri.toString());
 
-        try {
-          const result = await connection.sendRequest<LspInlayHint[] | null>(
-            "textDocument/inlayHint",
-            {
-              textDocument: { uri: docUri },
-              range: {
-                start: toLspPosition({
-                  lineNumber: range.startLineNumber,
-                  column: range.startColumn,
-                }),
-                end: toLspPosition({
-                  lineNumber: range.endLineNumber,
-                  column: range.endColumn,
-                }),
-              },
+        const result = await sendRequestWithTimeout<LspInlayHint[] | null>(
+          connection, "textDocument/inlayHint", {
+            textDocument: { uri: docUri },
+            range: {
+              start: toLspPosition({
+                lineNumber: range.startLineNumber,
+                column: range.startColumn,
+              }),
+              end: toLspPosition({
+                lineNumber: range.endLineNumber,
+                column: range.endColumn,
+              }),
             },
-          );
+          }, REQUEST_TIMEOUT_MS, token,
+        );
 
-          if (!result) return { hints: [], dispose() {} };
-          return {
-            hints: result.map(toMonacoInlayHint),
-            dispose() {},
-          };
-        } catch {
-          return { hints: [], dispose() {} };
-        }
+        if (!result) return { hints: [], dispose() {} };
+        return {
+          hints: result.map(toMonacoInlayHint),
+          dispose() {},
+        };
       },
     }),
   );
