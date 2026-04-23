@@ -621,8 +621,7 @@ impl ProjectManager {
             return Err(format!("project not found: {project_id}").into());
         }
         let meta = Self::read_meta(project_id)?;
-        let mut module_list: Vec<ModuleInfo> = meta.modules.into_values().collect();
-        module_list.sort_by(|a, b| a.module_type.cmp(&b.module_type).then(a.filename.cmp(&b.filename)));
+        let module_list = sorted_modules(meta.modules);
         Ok(ProjectInfo {
             project_id: meta.project_id,
             xlsm_path: meta.xlsm_path,
