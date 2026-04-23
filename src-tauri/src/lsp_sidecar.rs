@@ -48,6 +48,16 @@ pub struct LspSidecarState {
     child: Mutex<Option<CommandChild>>,
 }
 
+impl LspSidecarState {
+    /// Take and kill the sidecar process if it is running.
+    pub fn kill(&self) {
+        let mut guard = self.child.lock().expect("lsp sidecar mutex poisoned");
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
 /// Encode a JSON-RPC message as an LSP-framed byte sequence.
 pub(crate) fn encode_frame(message: &serde_json::Value) -> Vec<u8> {
     let body = serde_json::to_vec(message).expect("serde_json::Value always serializes");
@@ -104,31 +114,43 @@ fn extract_content_length(header: &str) -> Option<usize> {
     None
 }
 
+/// Clear the child handle so `lsp_send` returns NOT_SPAWNED and a
+/// subsequent `lsp_spawn` can restart the sidecar.
+fn clear_child(app: &AppHandle) {
+    if let Some(state) = app.try_state::<LspSidecarState>() {
+        let mut guard = state.child.lock().expect("lsp sidecar mutex poisoned");
+        *guard = None;
+    }
+}
+
 /// Spawn the verde-lsp sidecar if it is not already running. Idempotent:
 /// a second call is a no-op and returns `Ok(())`. The stdout reader and
 /// exit watcher are detached tasks; both emit their respective Tauri
 /// events and never panic.
 #[command]
 pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Result<(), String> {
-    {
-        let guard = state.child.lock().expect("lsp sidecar mutex poisoned");
+    // Hold the lock across check → spawn → store to prevent concurrent
+    // calls from creating two sidecar processes (TOCTOU race). Both
+    // sidecar() and spawn() are synchronous, so holding std::sync::Mutex
+    // here is safe and does not block the async runtime.
+    let mut rx = {
+        let mut guard = state.child.lock().expect("lsp sidecar mutex poisoned");
         if guard.is_some() {
+            eprintln!("[lsp_sidecar] lsp_spawn called but child already exists — idempotent no-op");
             return Ok(());
         }
-    }
+        eprintln!("[lsp_sidecar] lsp_spawn — spawning new sidecar process");
 
-    let sidecar = app
-        .shell()
-        .sidecar("verde-lsp")
-        .map_err(|e| format!("sidecar lookup failed: {e}"))?;
-    let (mut rx, child) = sidecar
-        .spawn()
-        .map_err(|e| format!("sidecar spawn failed: {e}"))?;
-
-    {
-        let mut guard = state.child.lock().expect("lsp sidecar mutex poisoned");
+        let sidecar = app
+            .shell()
+            .sidecar("verde-lsp")
+            .map_err(|e| format!("sidecar lookup failed: {e}"))?;
+        let (rx, child) = sidecar
+            .spawn()
+            .map_err(|e| format!("sidecar spawn failed: {e}"))?;
         *guard = Some(child);
-    }
+        rx
+    };
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -136,12 +158,31 @@ pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Res
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(bytes) => {
+                    eprintln!("[lsp_sidecar] stdout chunk: {} bytes, buf_before={}", bytes.len(), buf.len());
                     buf.extend_from_slice(&bytes);
-                    for msg in parse_frames(&mut buf) {
+                    let frames = parse_frames(&mut buf);
+                    for msg in &frames {
+                        let method = msg.get("method").and_then(|v| v.as_str());
+                        let id = msg.get("id");
+                        let is_error = msg.get("error").is_some();
+                        eprintln!(
+                            "[lsp_sidecar] → emit lsp://message  method={:?} id={:?} is_error={}",
+                            method, id, is_error
+                        );
                         let _ = app_handle.emit(LSP_MESSAGE_EVENT, msg);
+                    }
+                    if frames.is_empty() && buf.len() > 0 {
+                        eprintln!("[lsp_sidecar] stdout: incomplete frame, buf_remaining={}", buf.len());
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    eprintln!(
+                        "[lsp_sidecar] terminated: code={:?} signal={:?}",
+                        payload.code, payload.signal
+                    );
+                    // Clear state immediately so lsp_send stops writing to
+                    // a dead process and a new lsp_spawn can restart.
+                    clear_child(&app_handle);
                     let _ = app_handle.emit(
                         LSP_EXIT_EVENT,
                         LspExitPayload {
@@ -152,6 +193,8 @@ pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Res
                     break;
                 }
                 CommandEvent::Error(err) => {
+                    eprintln!("[lsp_sidecar] error event: {}", err);
+                    clear_child(&app_handle);
                     let _ = app_handle.emit(
                         LSP_EXIT_EVENT,
                         LspExitPayload {
@@ -164,17 +207,45 @@ pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Res
                 // Stderr is ignored on purpose — verde-lsp writes tracing
                 // logs there, which we surface through a different channel
                 // in a future sprint if needed.
-                CommandEvent::Stderr(_) => {}
+                CommandEvent::Stderr(bytes) => {
+                    if let Ok(text) = std::str::from_utf8(&bytes) {
+                        eprint!("[lsp_sidecar:stderr] {}", text);
+                    }
+                }
                 _ => {}
             }
         }
-        // Clear the state slot so a subsequent lsp_spawn can restart.
-        if let Some(state) = app_handle.try_state::<LspSidecarState>() {
-            let mut guard = state.child.lock().expect("lsp sidecar mutex poisoned");
-            *guard = None;
-        }
     });
 
+    // Brief alive check — yield to let the async reader task detect an
+    // immediate exit. If the sidecar died between spawn() and now, the
+    // Terminated event is already queued in rx and the task will call
+    // clear_child(), setting the slot to None. We use spawn_blocking to
+    // sleep without adding tokio as a direct dependency.
+    eprintln!("[lsp_sidecar] alive check — sleeping 50ms");
+    tauri::async_runtime::spawn_blocking(|| {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    })
+    .await
+    .map_err(|e| format!("alive check failed: {e}"))?;
+    {
+        let guard = state.child.lock().expect("lsp sidecar mutex poisoned");
+        if guard.is_none() {
+            eprintln!("[lsp_sidecar] alive check FAILED — child is None after 50ms");
+            return Err("sidecar exited immediately after spawn".to_string());
+        }
+    }
+    eprintln!("[lsp_sidecar] alive check passed — sidecar is running");
+
+    Ok(())
+}
+
+/// Kill the sidecar process. Called on window/tab close to prevent
+/// orphan processes. No-op if the sidecar is not running.
+#[command]
+pub async fn lsp_kill(state: State<'_, LspSidecarState>) -> Result<(), String> {
+    eprintln!("[lsp_sidecar] lsp_kill called");
+    state.kill();
     Ok(())
 }
 
@@ -186,14 +257,26 @@ pub async fn lsp_send(
     state: State<'_, LspSidecarState>,
     message: serde_json::Value,
 ) -> Result<(), String> {
+    let method = message.get("method").and_then(|v| v.as_str()).map(String::from);
+    let id = message.get("id").cloned();
     let frame = encode_frame(&message);
+    eprintln!(
+        "[lsp_sidecar] lsp_send: method={:?} id={:?} frame_len={}",
+        method, id, frame.len()
+    );
     let mut guard = state.child.lock().expect("lsp sidecar mutex poisoned");
     let child = guard
         .as_mut()
-        .ok_or_else(|| LSP_NOT_SPAWNED_SENTINEL.to_string())?;
+        .ok_or_else(|| {
+            eprintln!("[lsp_sidecar] lsp_send: child is None → NOT_SPAWNED");
+            LSP_NOT_SPAWNED_SENTINEL.to_string()
+        })?;
     child
         .write(&frame)
-        .map_err(|e| format!("sidecar stdin write failed: {e}"))
+        .map_err(|e| {
+            eprintln!("[lsp_sidecar] lsp_send: stdin write failed: {}", e);
+            format!("sidecar stdin write failed: {e}")
+        })
 }
 
 #[cfg(test)]

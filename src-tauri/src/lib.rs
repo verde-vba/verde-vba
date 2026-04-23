@@ -9,10 +9,11 @@ mod settings;
 mod vba_bridge;
 
 use std::sync::Mutex;
+use tauri::Manager;
 
 use commands::*;
 use file_watcher::{start_file_watcher, stop_file_watcher, FileWatcherState};
-use lsp_sidecar::{lsp_send, lsp_spawn, LspSidecarState};
+use lsp_sidecar::{lsp_kill, lsp_send, lsp_spawn, LspSidecarState};
 
 /// File path passed via CLI when the OS opens Verde with a file argument
 /// (e.g. right-click "Open with Verde"). The frontend calls
@@ -44,6 +45,16 @@ pub fn run(initial_file: Option<String>) {
             }
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                // Kill the LSP sidecar when the window is destroyed to
+                // prevent orphan processes. This covers app close, and
+                // is safe from React lifecycle races (runs in Rust only).
+                if let Some(state) = window.try_state::<LspSidecarState>() {
+                    state.kill();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             open_project,
             open_project_readonly,
@@ -62,6 +73,7 @@ pub fn run(initial_file: Option<String>) {
             save_settings,
             lsp_spawn,
             lsp_send,
+            lsp_kill,
             start_file_watcher,
             stop_file_watcher,
             get_initial_file,
