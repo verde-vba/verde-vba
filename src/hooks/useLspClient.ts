@@ -56,14 +56,23 @@ export interface UseLspClientOptions {
   monaco?: typeof import("monaco-editor") | null;
 }
 
+/// Granular lifecycle state of the LSP client, exposed so the UI can
+/// render a status indicator (e.g. a dot in the StatusBar).
+export type LspStatus = "stopped" | "connecting" | "ready" | "error";
+
 export interface UseLspClientResult {
   /// True once the LSP `initialize` response has been received and
   /// providers are registered. False during handshake and after errors.
   ready: boolean;
+  /// Granular lifecycle state for UI display.
+  status: LspStatus;
+  /// The active JSON-RPC connection, non-null only when `ready` is true.
+  /// Callers can use this to send LSP notifications (e.g. didOpen/didChange).
+  connection: MessageConnection | null;
 }
 
 /// Convert a filesystem path to a file:// URI suitable for LSP rootUri.
-function pathToFileUri(fsPath: string): string {
+export function pathToFileUri(fsPath: string): string {
   const normalized = fsPath.replace(/\\/g, "/");
   if (/^[A-Za-z]:/.test(normalized)) {
     return `file:///${normalized}`;
@@ -74,6 +83,8 @@ function pathToFileUri(fsPath: string): string {
 export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
   const { transport, onError, spawn, projectDir, monaco } = options;
   const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<LspStatus>("stopped");
+  const connectionRef = useRef<MessageConnection | null>(null);
   const retryCount = useRef(0);
   // Tracks whether the current sidecar process has already been
   // initialized. Persists across StrictMode unmount → remount.
@@ -84,7 +95,10 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
 
   useEffect(() => {
     // Gate on Monaco being loaded — providers need Monaco APIs to register.
-    if (!monaco) return;
+    if (!monaco) {
+      setStatus("stopped");
+      return;
+    }
 
     let cancelled = false;
     let terminated = false;
@@ -93,6 +107,7 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
     let providerDisposables: Array<{ dispose(): void }> = [];
 
     const teardownConnection = () => {
+      connectionRef.current = null;
       for (const d of providerDisposables) d.dispose();
       providerDisposables = [];
       closeReaderFn?.();
@@ -117,6 +132,7 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
         return;
       }
 
+      setStatus("error");
       onError?.(reason, detail);
     };
 
@@ -148,9 +164,17 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
         // mounts (lsp_spawn is idempotent). Skip handshake when we know
         // the process was already initialized.
         if (initializedRef.current) {
+          // connectionRef already holds the live connection from the
+          // first mount — no need to re-set it.
           setReady(true);
+          setStatus("ready");
           return;
         }
+
+        // Only transition to "connecting" when we actually need to
+        // perform the full handshake — avoids a connecting→ready flash
+        // when the effect re-runs but the sidecar is already alive.
+        setStatus("connecting");
 
         const transports = createTransports(transport);
         closeReaderFn = transports.closeReader;
@@ -166,10 +190,36 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
           rootUri,
           capabilities: {
             textDocument: {
+              synchronization: {
+                dynamicRegistration: false,
+                willSave: false,
+                willSaveWaitUntil: false,
+                didSave: true,
+              },
               completion: {
                 completionItem: { snippetSupport: false },
               },
               hover: { contentFormat: ["markdown", "plaintext"] },
+              signatureHelp: {
+                signatureInformation: {
+                  documentationFormat: ["markdown", "plaintext"],
+                  parameterInformation: { labelOffsetSupport: true },
+                },
+              },
+              definition: { dynamicRegistration: false },
+              references: { dynamicRegistration: false },
+              documentSymbol: {
+                hierarchicalDocumentSymbolSupport: true,
+              },
+              documentHighlight: { dynamicRegistration: false },
+              codeAction: {
+                codeActionLiteralSupport: {
+                  codeActionKind: { valueSet: ["quickfix", "refactor"] },
+                },
+              },
+              formatting: { dynamicRegistration: false },
+              rename: { prepareSupport: true },
+              inlayHint: { dynamicRegistration: false },
               publishDiagnostics: { relatedInformation: false },
             },
           },
@@ -192,9 +242,11 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
           { resolveDocumentUri },
         );
 
+        connectionRef.current = connection;
         retryCount.current = 0;
         initializedRef.current = true;
         setReady(true);
+        setStatus("ready");
       } catch (err) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
@@ -211,9 +263,11 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
               "vba",
               { resolveDocumentUri },
             );
+            connectionRef.current = connection;
             retryCount.current = 0;
             initializedRef.current = true;
             setReady(true);
+            setStatus("ready");
             return;
           }
           reportOnce("initialize-failed", msg);
@@ -232,5 +286,5 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
     };
   }, [transport, onError, spawn, projectDir, attempt, monaco]);
 
-  return { ready };
+  return { ready, status, connection: connectionRef.current };
 }

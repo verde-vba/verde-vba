@@ -24,7 +24,11 @@
     "saved": "{{filename}} を保存しました",
     "saveBlocked": "読み取り専用モードでは保存できません。書き込み権限で開き直してください。",
     "excelOpen": "Excel でこのブックが開かれています。Excel を閉じてから保存し直してください。",
-    "lineColumn": "行 {{line}}, 列 {{column}}"
+    "lineColumn": "行 {{line}}, 列 {{column}}",
+    "lspStopped": "LSP: 停止",
+    "lspConnecting": "LSP: 接続中",
+    "lspReady": "LSP: 稼働中",
+    "lspError": "LSP: エラー"
   },
   "lock": {
     "title": "ファイルがロックされています",

@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { registerVbaLanguage, VBA_LANGUAGE_ID } from "../lib/monaco-vba";
 import { registerTreeSitterVbaProvider } from "../lib/tree-sitter-vba";
 import { createTauriLspTransport } from "../lib/lsp-bridge";
-import { useLspClient, type LspClientLoadError } from "../hooks/useLspClient";
+import { useLspClient, pathToFileUri, type LspClientLoadError, type LspStatus } from "../hooks/useLspClient";
 
 interface EditorProps {
   filename: string;
@@ -28,6 +28,9 @@ interface EditorProps {
   // from `onTreeSitterLoadError` per Sprint 31 Execute 2 / 32 Planning
   // durable decision — each artifact has a distinct remediation message.
   onLspLoadError?: (reason: LspClientLoadError, detail?: string) => void;
+  /// Called when the LSP lifecycle status changes so the host can reflect
+  /// the state in the StatusBar.
+  onLspStatusChange?: (status: LspStatus) => void;
   /// Absolute filesystem path to the project directory in AppData. Passed
   /// as `rootUri` in the LSP initialize request so verde-lsp can find VBA
   /// source files.
@@ -47,6 +50,7 @@ export function Editor({
   onChange,
   onTreeSitterLoadError,
   onLspLoadError,
+  onLspStatusChange,
   projectDir,
 }: EditorProps) {
   const { t } = useTranslation();
@@ -65,13 +69,48 @@ export function Editor({
     () => () => invoke<void>("lsp_spawn"),
     [],
   );
-  useLspClient({
+  const { status: lspStatus, connection: lspConnection } = useLspClient({
     transport: lspTransport,
     spawn: lspSpawn,
     onError: onLspLoadError,
     projectDir,
     monaco,
   });
+
+  // ── LSP document synchronization ──
+  // didOpen when a file is activated (or connection becomes ready),
+  // didClose when switching away or unmounting.
+  const lspVersionRef = useRef(0);
+  // Ref for lspConnection so the editor save action (registered once on
+  // mount) always sees the latest connection without stale closures.
+  const lspConnectionRef = useRef(lspConnection);
+  lspConnectionRef.current = lspConnection;
+
+  useEffect(() => {
+    if (!lspConnection || !filename || !projectDir) return;
+
+    const docUri = pathToFileUri(`${projectDir}/${filename}`);
+    lspVersionRef.current = 1;
+
+    void lspConnection.sendNotification("textDocument/didOpen", {
+      textDocument: {
+        uri: docUri,
+        languageId: "vba",
+        version: lspVersionRef.current,
+        text: content,
+      },
+    });
+
+    return () => {
+      void lspConnection.sendNotification("textDocument/didClose", {
+        textDocument: { uri: docUri },
+      });
+    };
+  }, [lspConnection, filename, projectDir]); // content intentionally excluded — didOpen captures it at open time
+
+  useEffect(() => {
+    onLspStatusChange?.(lspStatus);
+  }, [lspStatus, onLspStatusChange]);
 
   const handleBeforeMount = useCallback(
     (monaco: typeof import("monaco-editor")) => {
@@ -97,6 +136,14 @@ export function Editor({
         run: () => {
           const value = editor.getValue();
           onSave?.(value);
+          // didSave — notify the LSP server so it can re-analyze.
+          const conn = lspConnectionRef.current;
+          if (conn && filename && projectDir) {
+            void conn.sendNotification("textDocument/didSave", {
+              textDocument: { uri: pathToFileUri(`${projectDir}/${filename}`) },
+              text: value,
+            });
+          }
         },
       });
     },
@@ -107,9 +154,21 @@ export function Editor({
     (value: string | undefined) => {
       if (value !== undefined) {
         onChange?.(value);
+
+        // didChange — full document sync on every edit.
+        if (lspConnection && filename && projectDir) {
+          lspVersionRef.current += 1;
+          void lspConnection.sendNotification("textDocument/didChange", {
+            textDocument: {
+              uri: pathToFileUri(`${projectDir}/${filename}`),
+              version: lspVersionRef.current,
+            },
+            contentChanges: [{ text: value }],
+          });
+        }
       }
     },
-    [onChange]
+    [onChange, lspConnection, filename, projectDir]
   );
 
   useEffect(() => {

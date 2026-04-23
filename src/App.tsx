@@ -14,6 +14,7 @@ import { TrustGuideDialog } from "./components/TrustGuideDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { getInitialFile, readModule } from "./lib/tauri-commands";
 import type { ModuleInfo } from "./lib/types";
+import type { LspStatus } from "./hooks/useLspClient";
 import { useErrorRouting } from "./hooks/useErrorRouting";
 import { useFileWatcher } from "./hooks/useFileWatcher";
 import { useModuleTabs } from "./hooks/useModuleTabs";
@@ -82,6 +83,7 @@ function App() {
   });
   const [editorContent, setEditorContent] = useState("");
   const [moduleLoading, setModuleLoading] = useState(false);
+  const [lspStatus, setLspStatus] = useState<LspStatus>("stopped");
   const buffersRef = useRef(new Map<string, string>());
   const savedContentsRef = useRef(new Map<string, string>());
   const [dirtyModules, setDirtyModules] = useState<ReadonlySet<string>>(new Set());
@@ -498,6 +500,7 @@ function App() {
                       message: t("errors.treeSitterWasmMissing"),
                     })
                   }
+                  onLspStatusChange={setLspStatus}
                   onLspLoadError={(reason, detail) => {
                     // Each reason maps to a distinct remediation string.
                     // Keeping the switch here (rather than in the hook)
@@ -612,6 +615,7 @@ function App() {
       <StatusBar
         status="ready"
         projectId={project?.project_id}
+        lspStatus={lspStatus}
       />
 
       {lockPrompt && (

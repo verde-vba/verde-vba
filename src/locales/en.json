@@ -24,7 +24,11 @@
     "saved": "Saved {{filename}}",
     "saveBlocked": "Cannot save while in Read-Only mode. Close and reopen with write access to save changes.",
     "excelOpen": "Excel has this workbook open. Close Excel and try saving again.",
-    "lineColumn": "Ln {{line}}, Col {{column}}"
+    "lineColumn": "Ln {{line}}, Col {{column}}",
+    "lspStopped": "LSP: Stopped",
+    "lspConnecting": "LSP: Connecting",
+    "lspReady": "LSP: Ready",
+    "lspError": "LSP: Error"
   },
   "lock": {
     "title": "File is locked",
