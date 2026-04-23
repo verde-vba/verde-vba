@@ -250,6 +250,45 @@ describe("useLspClient", () => {
 
   // --- Retry / reconnection tests ---
 
+  it("retries when sidecar exits during spawn (deferred exit)", async () => {
+    let emitExit: ((p: LspExitPayload) => void) | undefined;
+    const transport = makeTransport({
+      onExit: vi.fn(async (handler) => {
+        emitExit = handler;
+        return () => {};
+      }),
+    });
+    const onError = vi.fn();
+
+    // spawn() takes 50ms, during which an exit event arrives.
+    const spawn = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          // Fire exit mid-spawn to simulate sidecar dying immediately.
+          setTimeout(() => {
+            emitExit?.({ code: 0, signal: null });
+          }, 10);
+          setTimeout(resolve, 50);
+        }),
+    );
+
+    renderHook(() =>
+      useLspClient({ transport, onError, spawn, monaco: MOCK_MONACO }),
+    );
+
+    // Should NOT send initialize (sidecar is dead).
+    await waitFor(() => expect(spawn).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    expect(mockConnection.sendRequest).not.toHaveBeenCalledWith(
+      "initialize",
+      expect.anything(),
+    );
+    // Should trigger retry, not surface error.
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("retries on exit before surfacing error to UI", async () => {
     let emitExit: ((p: LspExitPayload) => void) | undefined;
     const transport = makeTransport({
@@ -333,7 +372,8 @@ describe("useLspClient", () => {
     );
   }, 20000);
 
-  it("does not re-create connection when effect re-runs after successful handshake", async () => {
+  it("re-creates connection and providers on StrictMode remount without re-initializing", async () => {
+    const { registerLspProviders } = await import("../lib/lsp-monaco-providers");
     const { createMessageConnection } = await import("vscode-jsonrpc");
     const transport = makeTransport();
 
@@ -345,16 +385,17 @@ describe("useLspClient", () => {
 
     await waitFor(() => expect(result.current.ready).toBe(true));
 
-    const callCountBefore = (createMessageConnection as ReturnType<typeof vi.fn>).mock.calls.length;
+    const providersBefore = (registerLspProviders as ReturnType<typeof vi.fn>).mock.calls.length;
 
     // Trigger effect re-run via a dep change (projectDir).
     rerender({ dir: "/tmp/project" });
 
     await waitFor(() => expect(result.current.ready).toBe(true));
-    // Should skip creating a new connection (initializedRef is true).
+    // Providers must be re-registered (initializedRef fast path creates
+    // a new connection + providers without sending initialize again).
     expect(
-      (createMessageConnection as ReturnType<typeof vi.fn>).mock.calls.length,
-    ).toBe(callCountBefore);
+      (registerLspProviders as ReturnType<typeof vi.fn>).mock.calls.length,
+    ).toBeGreaterThan(providersBefore);
   });
 
   it("resets retry counter after successful reconnect", async () => {
