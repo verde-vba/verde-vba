@@ -102,9 +102,13 @@ export function Editor({
     });
 
     return () => {
-      void lspConnection.sendNotification("textDocument/didClose", {
-        textDocument: { uri: docUri },
-      });
+      try {
+        lspConnection.sendNotification("textDocument/didClose", {
+          textDocument: { uri: docUri },
+        });
+      } catch {
+        // Connection may already be disposed during unmount — best-effort.
+      }
     };
   }, [lspConnection, filename, projectDir]); // content intentionally excluded — didOpen captures it at open time
 
@@ -139,10 +143,14 @@ export function Editor({
           // didSave — notify the LSP server so it can re-analyze.
           const conn = lspConnectionRef.current;
           if (conn && filename && projectDir) {
-            void conn.sendNotification("textDocument/didSave", {
-              textDocument: { uri: pathToFileUri(`${projectDir}/${filename}`) },
-              text: value,
-            });
+            try {
+              conn.sendNotification("textDocument/didSave", {
+                textDocument: { uri: pathToFileUri(`${projectDir}/${filename}`) },
+                text: value,
+              });
+            } catch {
+              // Connection may be disposed during unmount — best-effort.
+            }
           }
         },
       });
@@ -158,13 +166,17 @@ export function Editor({
         // didChange — full document sync on every edit.
         if (lspConnection && filename && projectDir) {
           lspVersionRef.current += 1;
-          void lspConnection.sendNotification("textDocument/didChange", {
-            textDocument: {
-              uri: pathToFileUri(`${projectDir}/${filename}`),
-              version: lspVersionRef.current,
-            },
-            contentChanges: [{ text: value }],
-          });
+          try {
+            lspConnection.sendNotification("textDocument/didChange", {
+              textDocument: {
+                uri: pathToFileUri(`${projectDir}/${filename}`),
+                version: lspVersionRef.current,
+              },
+              contentChanges: [{ text: value }],
+            });
+          } catch {
+            // Connection may be disposed during unmount — best-effort.
+          }
         }
       }
     },

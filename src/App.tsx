@@ -91,6 +91,25 @@ function App() {
   const [dirtyModules, setDirtyModules] = useState<ReadonlySet<string>>(new Set());
   const [fileConflict, setFileConflict] = useState<string | null>(null);
 
+  // ── Synchronize editor content on active-module change ──
+  // React's "adjust state during rendering" pattern ensures the very first
+  // render after a tab switch already carries the correct content.  Without
+  // this, @monaco-editor/react receives a new `path` while `value` still
+  // holds the *previous* module's text, which can crash Monaco and leave a
+  // white screen.
+  const [prevActiveFilename, setPrevActiveFilename] = useState<string | null>(null);
+  if ((activeModule?.filename ?? null) !== prevActiveFilename) {
+    setPrevActiveFilename(activeModule?.filename ?? null);
+    if (activeModule) {
+      const buffered = buffersRef.current.get(activeModule.filename);
+      setEditorContent(buffered ?? "");
+      setModuleLoading(buffered === undefined && !!project);
+    } else {
+      setEditorContent("");
+      setModuleLoading(false);
+    }
+  }
+
   useFileWatcher({
     projectId: project?.project_id ?? null,
     projectDir: project?.project_dir ?? null,
@@ -496,6 +515,7 @@ function App() {
                 {moduleLoading && <Loader />}
                 {isSaving && <Loader message={t("editor.saving")} />}
                 <Editor
+                  key={activeModule.filename}
                   filename={activeModule.filename}
                   content={editorContent}
                   theme={resolved}

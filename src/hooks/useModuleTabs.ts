@@ -32,13 +32,15 @@ export function useModuleTabs({ activeModule, setActiveModule }: UseModuleTabsOp
 
   const handleCloseModule = useCallback(
     (mod: ModuleInfo) => {
-      setOpenModules((prev) => prev.filter((m) => m.filename !== mod.filename));
-      if (activeModule?.filename === mod.filename) {
-        const remaining = openModules.filter((m) => m.filename !== mod.filename);
-        setActiveModule(remaining[remaining.length - 1] ?? null);
-      }
+      setOpenModules((prev) => {
+        const next = prev.filter((m) => m.filename !== mod.filename);
+        if (activeModule?.filename === mod.filename) {
+          setActiveModule(next[next.length - 1] ?? null);
+        }
+        return next;
+      });
     },
-    [activeModule, openModules, setActiveModule]
+    [activeModule, setActiveModule]
   );
 
   return { openModules, handleSelectModule, handleCloseModule };

@@ -211,6 +211,7 @@ describe("App save blocked", () => {
       // checkConflict is called inside the open flow; resolve empty so it
       // doesn't accidentally surface a ConflictDialog that steals focus.
       if (cmd === "check_conflict") return Promise.resolve([]);
+      if (cmd === "read_module") return Promise.resolve("");
       if (cmd === "save_module") {
         return Promise.reject(new Error("EXCEL_OPEN: workbook is open"));
       }
@@ -294,6 +295,7 @@ describe("App save blocked", () => {
       // checkConflict is called inside the read-only open flow; resolve
       // empty so no ConflictDialog steals the Banner assertion below.
       if (cmd === "check_conflict") return Promise.resolve([]);
+      if (cmd === "read_module") return Promise.resolve("");
       if (BACKGROUND_COMMANDS.has(cmd)) return Promise.resolve(null);
     return Promise.reject(new Error(`unexpected command: ${cmd}`));
     });
