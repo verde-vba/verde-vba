@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use tauri::{command, State};
 
-use crate::conflict::ConflictModuleDto;
+use crate::conflict::{ConflictContentDto, ConflictModuleDto};
 use crate::file_watcher::FileWatcherState;
 use crate::lock::{LockInfo, LockManager};
 use crate::project::{ProjectInfo, ProjectManager};
@@ -156,6 +158,32 @@ pub async fn resolve_conflict(
     let manager = ProjectManager::new();
     manager
         .resolve_conflict(&project_id, &xlsm_path, &side)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn fetch_conflict_contents(
+    project_id: String,
+    xlsm_path: String,
+    filenames: Vec<String>,
+) -> Result<Vec<ConflictContentDto>, String> {
+    let manager = ProjectManager::new();
+    manager
+        .fetch_conflict_contents(&project_id, &xlsm_path, &filenames)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn resolve_conflict_per_module(
+    project_id: String,
+    xlsm_path: String,
+    decisions: HashMap<String, String>,
+) -> Result<(), String> {
+    let manager = ProjectManager::new();
+    manager
+        .resolve_conflict_per_module(&project_id, &xlsm_path, &decisions)
         .await
         .map_err(|e| e.to_string())
 }

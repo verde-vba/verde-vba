@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::conflict::{detect_conflicts, ConflictModule};
+use crate::conflict::{detect_conflicts, ConflictContentDto, ConflictModule};
 
 /// Decode bytes exported by Excel COM into a UTF-8 String.
 ///
@@ -109,6 +109,12 @@ pub(crate) const EXCEL_OPEN_HRESULTS: &[i32] =
 /// surface a "close Excel first" dialog (PLANS §9 step 4).
 pub const EXCEL_OPEN_MARKER: &str = "EXCEL_OPEN";
 
+/// Marker embedded in error messages when `$wb.VBProject` is inaccessible
+/// because the Excel Trust Center setting "Trust access to the VBA project
+/// object model" is disabled. The frontend matches on this prefix to
+/// re-surface the TrustGuideDialog.
+pub const TRUST_ACCESS_MARKER: &str = "TRUST_ACCESS";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModuleInfo {
     pub filename: String,
@@ -132,6 +138,19 @@ pub struct ProjectInfo {
     pub xlsm_path: String,
     pub project_dir: String,
     pub modules: Vec<ModuleInfo>,
+}
+
+/// Sort modules by type code (standard=1, class=2, form=3, document=100),
+/// then alphabetically by filename within each type. This gives a stable,
+/// VBE-like ordering regardless of HashMap iteration order.
+fn sorted_modules(modules: HashMap<String, ModuleInfo>) -> Vec<ModuleInfo> {
+    let mut list: Vec<ModuleInfo> = modules.into_values().collect();
+    list.sort_by(|a, b| {
+        a.module_type
+            .cmp(&b.module_type)
+            .then(a.filename.cmp(&b.filename))
+    });
+    list
 }
 
 pub struct ProjectManager;
@@ -180,19 +199,6 @@ impl ProjectManager {
         Ok(())
     }
 
-    /// Infer `VBComponent.Type` from the file extension produced by the
-    /// export script. The mapping mirrors the PS `switch ($comp.Type)` in
-    /// `EXPORT_SCRIPT` — lossy for type 100 (Document → `.cls`), but
-    /// sufficient for the editor's module-type icon/badge.
-    fn module_type_from_extension(filename: &str) -> u32 {
-        match Path::new(filename).extension().and_then(|e| e.to_str()) {
-            Some("bas") => 1,
-            Some("cls") => 2,
-            Some("frm") => 3,
-            _ => 1,
-        }
-    }
-
     /// Export VBA modules from Excel into the project directory and write
     /// `.verde-meta.json`. Shared by first-open and sync-from-Excel flows.
     async fn export_and_init(
@@ -200,21 +206,20 @@ impl ProjectManager {
         xlsm_path: &str,
         project_dir: &Path,
     ) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
-        let filenames = VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
+        let exported = VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
 
         let mut modules = HashMap::new();
-        for filename in &filenames {
-            let path = project_dir.join(filename);
+        for em in &exported {
+            let path = project_dir.join(&em.filename);
             let bytes = std::fs::read(&path)?;
             let content = decode_vba_bytes(&bytes);
             let hash = Self::content_hash(&content);
             let line_count = content.lines().count();
-            let module_type = Self::module_type_from_extension(filename);
             modules.insert(
-                filename.clone(),
+                em.filename.clone(),
                 ModuleInfo {
-                    filename: filename.clone(),
-                    module_type,
+                    filename: em.filename.clone(),
+                    module_type: em.module_type,
                     line_count,
                     hash,
                 },
@@ -229,11 +234,13 @@ impl ProjectManager {
         };
         Self::write_meta(project_id, &meta)?;
 
+        let module_list = sorted_modules(modules);
+
         Ok(ProjectInfo {
             project_id: project_id.to_string(),
             xlsm_path: xlsm_path.to_string(),
             project_dir: project_dir.to_string_lossy().to_string(),
-            modules: modules.into_values().collect(),
+            modules: module_list,
         })
     }
 
@@ -246,19 +253,32 @@ impl ProjectManager {
             // Re-open: return existing modules without re-exporting.
             // Conflict detection (check_conflict) handles divergence.
             let meta = Self::read_meta(&project_id)?;
+            let module_list = sorted_modules(meta.modules);
             return Ok(ProjectInfo {
                 project_id: meta.project_id,
                 xlsm_path: meta.xlsm_path,
                 project_dir: project_dir.to_string_lossy().to_string(),
-                modules: meta.modules.into_values().collect(),
+                modules: module_list,
             });
         }
 
         // First open: export from Excel and create meta. If the export
         // fails (non-Windows, Excel not installed, corrupted workbook),
         // fall back to an empty project so the open flow isn't blocked.
+        //
+        // Exception: actionable errors (wb-null, trust-denied) must
+        // propagate so the frontend can surface a specific dialog —
+        // silently falling back to an empty project leaves the user with
+        // no explanation and no actionable guidance.
         match Self::export_and_init(&project_id, xlsm_path, &project_dir).await {
             Ok(info) => Ok(info),
+            Err(e) if {
+                let m = e.to_string();
+                Self::is_wb_null_error(&m) || Self::is_trust_access_error(&m)
+            } =>
+            {
+                Err(Self::classify_com_error(e))
+            }
             Err(e) => {
                 log::warn!(
                     "Excel export failed on first open, continuing with empty project: {e}"
@@ -393,13 +413,43 @@ impl ProjectManager {
         }
     }
 
-    /// Classify an import failure. Any error whose stderr/message matches a
-    /// known EXCEL_OPEN substring is re-wrapped with the EXCEL_OPEN marker
-    /// so the UI can branch on it. Non-matching errors pass through
-    /// unchanged.
-    fn classify_import_error(err: Box<dyn std::error::Error>) -> Box<dyn std::error::Error> {
+    /// Pure classification: returns `true` if the captured stderr/message
+    /// indicates the workbook reference is null after connection attempt.
+    ///
+    /// The PS `vbproject_guard!` macro writes `VERDE_WB_NULL` to stderr
+    /// when `$wb` is null after `excel_connect!`.
+    pub(crate) fn is_wb_null_error(err_msg: &str) -> bool {
+        err_msg.contains("VERDE_WB_NULL")
+    }
+
+    /// Pure classification: returns `true` if the captured stderr/message
+    /// indicates the VBProject is inaccessible because the Excel Trust Center
+    /// setting "Trust access to the VBA project object model" is disabled.
+    ///
+    /// The PS `vbproject_guard!` macro writes `VERDE_TRUST_DENIED` to stderr
+    /// before throwing, giving us a locale-agnostic detection path.
+    pub(crate) fn is_trust_access_error(err_msg: &str) -> bool {
+        err_msg.contains("VERDE_TRUST_DENIED")
+    }
+
+    /// Classify an import/export failure. Checks the most specific markers
+    /// first (wb-null, trust-denied), then Excel-open.
+    /// Non-matching errors pass through unchanged.
+    fn classify_com_error(err: Box<dyn std::error::Error>) -> Box<dyn std::error::Error> {
         let msg = err.to_string();
-        if Self::is_excel_open_error(&msg) {
+        if Self::is_wb_null_error(&msg) {
+            format!(
+                "{}: Workbook could not be opened. Excel may have the file locked or the path could not be resolved.",
+                EXCEL_OPEN_MARKER
+            )
+            .into()
+        } else if Self::is_trust_access_error(&msg) {
+            format!(
+                "{}: VBProject is not accessible. Enable 'Trust access to the VBA project object model' in Excel settings.",
+                TRUST_ACCESS_MARKER
+            )
+            .into()
+        } else if Self::is_excel_open_error(&msg) {
             format!(
                 "{}: Excel appears to have the workbook open. Close it and retry. ({})",
                 EXCEL_OPEN_MARKER, msg
@@ -454,7 +504,7 @@ impl ProjectManager {
             if let Some(xlsm_path) = xlsm_path {
                 let source_dir = project_dir.to_string_lossy().to_string();
                 if let Err(e) = VbaBridge::import(&xlsm_path, &source_dir, filename).await {
-                    return Err(Self::classify_import_error(e));
+                    return Err(Self::classify_com_error(e));
                 }
                 // Only update the stored hash after Excel has accepted the
                 // import — otherwise a later conflict check would think the
@@ -516,7 +566,7 @@ impl ProjectManager {
         let refs: Vec<&str> = module_files.iter().map(|s| s.as_str()).collect();
         VbaBridge::import_batch(&xlsm_path, &source_dir, &refs)
             .await
-            .map_err(Self::classify_import_error)?;
+            .map_err(Self::classify_com_error)?;
 
         // Refresh meta hashes after the batch import succeeds so a
         // subsequent conflict check sees the workbook as in sync.
@@ -571,11 +621,13 @@ impl ProjectManager {
             return Err(format!("project not found: {project_id}").into());
         }
         let meta = Self::read_meta(project_id)?;
+        let mut module_list: Vec<ModuleInfo> = meta.modules.into_values().collect();
+        module_list.sort_by(|a, b| a.module_type.cmp(&b.module_type).then(a.filename.cmp(&b.filename)));
         Ok(ProjectInfo {
             project_id: meta.project_id,
             xlsm_path: meta.xlsm_path,
             project_dir: project_dir.to_string_lossy().to_string(),
-            modules: meta.modules.into_values().collect(),
+            modules: module_list,
         })
     }
 
@@ -646,7 +698,7 @@ impl ProjectManager {
         let temp_dir = Self::make_temp_dir(project_id)?;
         let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
         let excel_hashes = match export_result {
-            Ok(_filenames) => Self::hash_files_in_dir(&temp_dir)?,
+            Ok(_) => Self::hash_files_in_dir(&temp_dir)?,
             Err(e) => {
                 // Always best-effort cleanup before propagating.
                 let _ = std::fs::remove_dir_all(&temp_dir);
@@ -696,7 +748,7 @@ impl ProjectManager {
                 let refs: Vec<&str> = module_files.iter().map(|s| s.as_str()).collect();
                 VbaBridge::import_batch(xlsm_path, &source_dir, &refs)
                     .await
-                    .map_err(Self::classify_import_error)?;
+                    .map_err(Self::classify_com_error)?;
 
                 for name in &module_files {
                     let bytes = std::fs::read(project_dir.join(name))?;
@@ -710,19 +762,141 @@ impl ProjectManager {
                 // then refresh meta hashes so a subsequent check is clean.
                 std::fs::create_dir_all(&project_dir)?;
                 let exported = VbaBridge::export(xlsm_path, &project_dir.to_string_lossy()).await?;
-                for filename in exported {
-                    let path = project_dir.join(&filename);
+                for em in exported {
+                    let path = project_dir.join(&em.filename);
                     if !path.exists() {
                         continue;
                     }
                     let bytes = std::fs::read(&path)?;
                     let content = decode_vba_bytes(&bytes);
-                    Self::update_module_hash(project_id, &filename, &content)?;
+                    Self::update_module_hash(project_id, &em.filename, &content)?;
                 }
                 Ok(())
             }
             other => Err(format!("Invalid side: must be 'verde' or 'excel', got '{other}'").into()),
         }
+    }
+
+    /// Return the actual source content from both sides (AppData and live
+    /// Excel) for the given list of conflicting filenames. The frontend
+    /// feeds these into a Monaco DiffEditor.
+    pub(crate) async fn fetch_conflict_contents(
+        &self,
+        project_id: &str,
+        xlsm_path: &str,
+        filenames: &[String],
+    ) -> Result<Vec<ConflictContentDto>, Box<dyn std::error::Error>> {
+        let project_dir = Self::project_dir(project_id);
+
+        // Export Excel modules to a temp directory once — reading a single
+        // COM export is far cheaper than N individual calls.
+        let temp_dir = Self::make_temp_dir(project_id)?;
+        let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
+        if let Err(e) = export_result {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return Err(e);
+        }
+
+        let mut contents = Vec::with_capacity(filenames.len());
+        for filename in filenames {
+            let verde_path = project_dir.join(filename);
+            let verde_content = if verde_path.exists() {
+                let bytes = std::fs::read(&verde_path)?;
+                decode_vba_bytes(&bytes)
+            } else {
+                String::new()
+            };
+
+            let excel_path = temp_dir.join(filename);
+            let excel_content = if excel_path.exists() {
+                let bytes = std::fs::read(&excel_path)?;
+                decode_vba_bytes(&bytes)
+            } else {
+                String::new()
+            };
+
+            contents.push(ConflictContentDto {
+                filename: filename.clone(),
+                verde_content,
+                excel_content,
+            });
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        Ok(contents)
+    }
+
+    /// Resolve conflicts on a per-module basis. Each entry in `decisions`
+    /// maps a module filename to `"verde"` or `"excel"`. Modules marked
+    /// "verde" are batch-imported into Excel; modules marked "excel" are
+    /// freshly exported from Excel and written to AppData.
+    pub(crate) async fn resolve_conflict_per_module(
+        &self,
+        project_id: &str,
+        xlsm_path: &str,
+        decisions: &HashMap<String, String>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let project_dir = Self::project_dir(project_id);
+        if !project_dir.exists() {
+            return Err("Project directory not found".into());
+        }
+
+        // Partition decisions into two buckets.
+        let mut verde_modules: Vec<&str> = Vec::new();
+        let mut excel_modules: Vec<&str> = Vec::new();
+        for (filename, side) in decisions {
+            match side.as_str() {
+                "verde" => verde_modules.push(filename),
+                "excel" => excel_modules.push(filename),
+                other => {
+                    return Err(
+                        format!("Invalid side for {filename}: must be 'verde' or 'excel', got '{other}'").into(),
+                    );
+                }
+            }
+        }
+
+        // Step 1: Export Excel modules to temp dir for "excel" picks.
+        // Do this BEFORE importing "verde" modules so we capture the
+        // pre-resolution Excel state.
+        if !excel_modules.is_empty() {
+            let temp_dir = Self::make_temp_dir(project_id)?;
+            let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
+            match export_result {
+                Ok(_) => {
+                    for filename in &excel_modules {
+                        let src = temp_dir.join(filename);
+                        if src.exists() {
+                            let bytes = std::fs::read(&src)?;
+                            let content = decode_vba_bytes(&bytes);
+                            std::fs::write(project_dir.join(filename), content.as_bytes())?;
+                            Self::update_module_hash(project_id, filename, &content)?;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&temp_dir);
+                    return Err(e);
+                }
+            }
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        // Step 2: Batch-import "verde" modules into Excel.
+        if !verde_modules.is_empty() {
+            let source_dir = project_dir.to_string_lossy().to_string();
+            VbaBridge::import_batch(xlsm_path, &source_dir, &verde_modules)
+                .await
+                .map_err(Self::classify_com_error)?;
+
+            for filename in &verde_modules {
+                let bytes = std::fs::read(project_dir.join(filename))?;
+                let content = decode_vba_bytes(&bytes);
+                Self::update_module_hash(project_id, filename, &content)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -921,6 +1095,33 @@ mod tests {
             "Japanese-locale error must be classified via the VERDE_HRESULT \
              tag emitted by the PS catch block (locale-agnostic path)."
         );
+    }
+
+    // --- is_trust_access_error ---
+
+    #[test]
+    fn is_trust_access_error_detects_verde_trust_denied_tag() {
+        // The PS vbproject_guard! writes VERDE_TRUST_DENIED to stderr before
+        // throwing. The classifier must detect it regardless of surrounding text.
+        let stderr = "Cannot access VBProject.\nVERDE_TRUST_DENIED\nVERDE_HRESULT=0x80131501\n";
+        assert!(ProjectManager::is_trust_access_error(stderr));
+    }
+
+    #[test]
+    fn is_trust_access_error_rejects_unrelated_errors() {
+        assert!(!ProjectManager::is_trust_access_error(
+            "VERDE_HRESULT=0x80070020\nfile is being used by another process"
+        ));
+        assert!(!ProjectManager::is_trust_access_error(""));
+    }
+
+    #[test]
+    fn is_trust_access_error_takes_priority_over_excel_open_when_both_present() {
+        // Edge case: both markers in the same stderr output. Trust-denied
+        // is more specific and must win — it tells the user to fix the
+        // Trust Center setting, not to close Excel.
+        let stderr = "VERDE_TRUST_DENIED\nbeing used by another process\nVERDE_HRESULT=0x80131501\n";
+        assert!(ProjectManager::is_trust_access_error(stderr));
     }
 
     #[test]

@@ -1,6 +1,10 @@
 import { useTranslation } from "react-i18next";
 
-export function Loader() {
+interface LoaderProps {
+  message?: string;
+}
+
+export function Loader({ message }: LoaderProps) {
   const { t } = useTranslation();
 
   return (
@@ -29,7 +33,7 @@ export function Loader() {
         }}
       />
       <span style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
-        {t("editor.loading")}
+        {message ?? t("editor.loading")}
       </span>
     </div>
   );

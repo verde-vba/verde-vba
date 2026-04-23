@@ -175,6 +175,30 @@ export function useVerdeProject() {
     [state.project, state.conflict]
   );
 
+  const resolveConflictPerModule = useCallback(
+    async (decisions: Record<string, "verde" | "excel">) => {
+      if (!state.project || !state.conflict) return;
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        await commands.resolveConflictPerModule(
+          state.project.project_id,
+          state.project.xlsm_path,
+          decisions
+        );
+        setState((s) => ({ ...s, conflict: null }));
+      } catch (e) {
+        setState((s) => ({
+          ...s,
+          error: e instanceof Error ? e.message : String(e),
+        }));
+        throw e;
+      } finally {
+        setState((s) => ({ ...s, loading: false }));
+      }
+    },
+    [state.project, state.conflict]
+  );
+
   return {
     ...state,
     openProject,
@@ -184,5 +208,6 @@ export function useVerdeProject() {
     saveModule,
     syncToExcel,
     resolveConflict,
+    resolveConflictPerModule,
   };
 }

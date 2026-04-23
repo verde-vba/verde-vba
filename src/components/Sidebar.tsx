@@ -55,7 +55,7 @@ export function Sidebar({ modules, activeModule, onSelectModule }: SidebarProps)
           </div>
         ) : (
           modules.map((mod) => {
-            const typeLabel = moduleTypeLabel(mod.module_type);
+            const typeLabel = moduleTypeLabel(mod.type);
             const isActive = activeModule?.filename === mod.filename;
             return (
               <button

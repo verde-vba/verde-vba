@@ -202,7 +202,7 @@ describe("App save blocked", () => {
       xlsm_path: "C:/tmp/missing.xlsm",
       project_dir: "C:/verde/projects/abc1234567890def",
       modules: [
-        { filename: "Module1.bas", module_type: 1, line_count: 0, hash: "h" },
+        { filename: "Module1.bas", type: 1, line_count: 0, hash: "h" },
       ],
     };
     invokeMock.mockImplementation((cmd: string) => {
@@ -276,7 +276,7 @@ describe("App save blocked", () => {
       xlsm_path: "C:/tmp/missing.xlsm",
       project_dir: "C:/verde/projects/abc1234567890def",
       modules: [
-        { filename: "Module1.bas", module_type: 1, line_count: 0, hash: "h" },
+        { filename: "Module1.bas", type: 1, line_count: 0, hash: "h" },
       ],
     };
     invokeMock.mockImplementation((cmd: string) => {

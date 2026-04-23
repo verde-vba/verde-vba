@@ -3,6 +3,18 @@ use std::path::Path;
 #[allow(unused_imports)]
 use std::process::Command;
 
+use serde::Deserialize;
+
+/// A module entry returned by the PowerShell export script.
+/// Contains the filename (e.g. "Module1.bas") and the COM
+/// `VBComponent.Type` code (1=standard, 2=class, 3=form, 100=document).
+#[derive(Debug, Deserialize)]
+pub(crate) struct ExportedModule {
+    pub filename: String,
+    #[serde(rename = "type")]
+    pub module_type: u32,
+}
+
 /// Sprint 23 / PBI #15 — structural fix for PS injection.
 ///
 /// The PS scripts below are **fully static**: caller data (xlsm path,
@@ -186,10 +198,10 @@ try {
         $filename = $comp.Name + $ext
         $filepath = Join-Path $outputDir $filename
         $comp.Export($filepath)
-        $modules += $filename
+        $modules += [PSCustomObject]@{ filename = $filename; type = [int]$comp.Type }
     }
     $wb.Close($false)
-    $modules | ConvertTo-Json
+    $modules | ConvertTo-Json -Compress
 "#,
     hresult_catch!(),
     r#"
@@ -323,7 +335,7 @@ impl VbaBridge {
     pub async fn export(
         xlsm_path: &str,
         output_dir: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ExportedModule>, Box<dyn std::error::Error>> {
         let output = Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -342,7 +354,7 @@ impl VbaBridge {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let modules: Vec<String> = serde_json::from_str(&stdout)?;
+        let modules: Vec<ExportedModule> = serde_json::from_str(&stdout)?;
         Ok(modules)
     }
 
@@ -420,7 +432,7 @@ impl VbaBridge {
     pub async fn export(
         _xlsm_path: &str,
         _output_dir: &str,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ExportedModule>, Box<dyn std::error::Error>> {
         Err("VBA bridge requires Windows with Excel installed".into())
     }
 

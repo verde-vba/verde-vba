@@ -56,6 +56,8 @@ pub fn run(initial_file: Option<String>) {
             get_project_info,
             check_conflict,
             resolve_conflict,
+            fetch_conflict_contents,
+            resolve_conflict_per_module,
             get_settings,
             save_settings,
             lsp_spawn,

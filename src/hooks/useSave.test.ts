@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useSave } from "./useSave";
 import type { ModuleInfo } from "../lib/types";
 
-const mod1: ModuleInfo = { filename: "Module1.bas", module_type: 1, line_count: 10, hash: "h1" };
+const mod1: ModuleInfo = { filename: "Module1.bas", type: 1, line_count: 10, hash: "h1" };
 
 const SAVE_BLOCKED_READONLY = "SAVE_BLOCKED_READONLY";
 

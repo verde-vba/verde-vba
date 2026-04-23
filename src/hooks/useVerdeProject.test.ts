@@ -170,7 +170,7 @@ describe("useVerdeProject", () => {
       const { result } = renderHook(() => useVerdeProject());
       const mod: ModuleInfo = {
         filename: "Module1.bas",
-        module_type: 1,
+        type: 1,
         line_count: 0,
         hash: "",
       };

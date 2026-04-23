@@ -1,6 +1,7 @@
 export interface ModuleInfo {
   filename: string;
-  module_type: number;
+  /** Serialized as `"type"` from Rust via `#[serde(rename = "type")]` */
+  type: number;
   line_count: number;
   hash: string;
 }
@@ -61,6 +62,14 @@ export interface ConflictModule {
 export interface ConflictInfo {
   projectId: string;
   modules: ConflictModule[];
+}
+
+/// Actual source content from both sides, used by the DiffEditor to
+/// show what changed between Verde (AppData) and Excel (COM export).
+export interface ConflictContent {
+  filename: string;
+  verdeContent: string;
+  excelContent: string;
 }
 
 export type VbaModuleType = "standard" | "class" | "form" | "document";

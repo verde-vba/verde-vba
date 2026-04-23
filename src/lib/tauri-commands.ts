@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ConflictModule, ProjectInfo, Settings } from "./types";
+import type { ConflictContent, ConflictModule, ProjectInfo, Settings } from "./types";
 
 export async function getInitialFile(): Promise<string | null> {
   return invoke<string | null>("get_initial_file");
@@ -76,6 +76,34 @@ export async function resolveConflict(
   side: "verde" | "excel"
 ): Promise<void> {
   return invoke("resolve_conflict", { projectId, xlsmPath, side });
+}
+
+/// Fetch the actual source content from both sides for the given
+/// conflicting modules. Used by the diff viewer in the conflict dialog.
+export async function fetchConflictContents(
+  projectId: string,
+  xlsmPath: string,
+  filenames: string[]
+): Promise<ConflictContent[]> {
+  return invoke<ConflictContent[]>("fetch_conflict_contents", {
+    projectId,
+    xlsmPath,
+    filenames,
+  });
+}
+
+/// Resolve conflicts on a per-module basis. Each key is a filename,
+/// each value is "verde" or "excel".
+export async function resolveConflictPerModule(
+  projectId: string,
+  xlsmPath: string,
+  decisions: Record<string, "verde" | "excel">
+): Promise<void> {
+  return invoke("resolve_conflict_per_module", {
+    projectId,
+    xlsmPath,
+    decisions,
+  });
 }
 
 export async function getSettings(): Promise<Settings> {

@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { useModuleTabs } from "./useModuleTabs";
 import type { ModuleInfo } from "../lib/types";
 
-const mod1: ModuleInfo = { filename: "Module1.bas", module_type: 1, line_count: 10, hash: "h1" };
-const mod2: ModuleInfo = { filename: "Module2.bas", module_type: 1, line_count: 5, hash: "h2" };
-const mod3: ModuleInfo = { filename: "Module3.bas", module_type: 1, line_count: 3, hash: "h3" };
+const mod1: ModuleInfo = { filename: "Module1.bas", type: 1, line_count: 10, hash: "h1" };
+const mod2: ModuleInfo = { filename: "Module2.bas", type: 1, line_count: 5, hash: "h2" };
+const mod3: ModuleInfo = { filename: "Module3.bas", type: 1, line_count: 3, hash: "h3" };
 
 describe("useModuleTabs", () => {
   it("handleSelectModule calls setActiveModule with the module", () => {

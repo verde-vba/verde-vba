@@ -35,6 +35,17 @@ impl From<ConflictModule> for ConflictModuleDto {
     }
 }
 
+/// Actual source content for both sides of a conflict, used by the
+/// frontend to render a Monaco DiffEditor so the user can make an
+/// informed per-module decision.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ConflictContentDto {
+    pub filename: String,
+    pub verde_content: String,
+    pub excel_content: String,
+}
+
 /// Compare per-module hashes across AppData files, `.verde-meta.json`, and a
 /// fresh Excel export. Returns the set of modules whose hashes disagree.
 ///
@@ -170,5 +181,18 @@ mod tests {
         assert!(json.contains("\"fileHash\":\"f\""));
         assert!(json.contains("\"metaHash\":\"m\""));
         assert!(json.contains("\"excelHash\":\"e\""));
+    }
+
+    #[test]
+    fn content_dto_serializes_as_camel_case() {
+        let dto = ConflictContentDto {
+            filename: "Module1.bas".into(),
+            verde_content: "Sub Foo()\nEnd Sub".into(),
+            excel_content: "Sub Bar()\nEnd Sub".into(),
+        };
+        let json = serde_json::to_string(&dto).unwrap();
+        assert!(json.contains("\"verdeContent\":"));
+        assert!(json.contains("\"excelContent\":"));
+        assert!(json.contains("\"filename\":\"Module1.bas\""));
     }
 }

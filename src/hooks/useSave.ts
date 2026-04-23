@@ -21,10 +21,12 @@ export function useSave({
   xlsmPath,
 }: UseSaveOptions) {
   const [saveBlockedPrompt, setSaveBlockedPrompt] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = useCallback(
     async (content: string): Promise<boolean> => {
       if (!activeModule) return false;
+      setIsSaving(true);
       try {
         await saveModule(activeModule.filename, content);
         setExcelOpenPrompt(null);
@@ -40,6 +42,8 @@ export function useSave({
         }
         handleCaughtBackendError(e, xlsmPath);
         return false;
+      } finally {
+        setIsSaving(false);
       }
       // TODO: wire ConflictDialog here once the backend reports
       // file-vs-Excel content conflicts (different from EXCEL_OPEN, which
@@ -48,5 +52,5 @@ export function useSave({
     [activeModule, saveModule, setExcelOpenPrompt, handleCaughtBackendError, saveBlockedMessage, xlsmPath]
   );
 
-  return { saveBlockedPrompt, setSaveBlockedPrompt, handleSave };
+  return { saveBlockedPrompt, setSaveBlockedPrompt, handleSave, isSaving };
 }

@@ -12,7 +12,7 @@ initI18n("en");
 
 const makeModule = (filename: string): ModuleInfo => ({
   filename,
-  module_type: 1,
+  type: 1,
   line_count: 0,
   hash: "",
 });
