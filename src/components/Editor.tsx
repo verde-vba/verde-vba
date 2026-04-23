@@ -158,25 +158,38 @@ export function Editor({
     [onSave, t]
   );
 
+  // Debounce didChange notifications to avoid flooding the LSP server
+  // with full-document rewrites on every keystroke. The UI callback
+  // (onChange) fires immediately so the editor stays responsive.
+  const didChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (didChangeTimerRef.current) clearTimeout(didChangeTimerRef.current);
+    };
+  }, []);
+
   const handleChange = useCallback(
     (value: string | undefined) => {
       if (value !== undefined) {
         onChange?.(value);
 
-        // didChange — full document sync on every edit.
+        // didChange — debounced full document sync.
         if (lspConnection && filename && projectDir) {
-          lspVersionRef.current += 1;
-          try {
-            lspConnection.sendNotification("textDocument/didChange", {
-              textDocument: {
-                uri: pathToFileUri(`${projectDir}/${filename}`),
-                version: lspVersionRef.current,
-              },
-              contentChanges: [{ text: value }],
-            });
-          } catch {
-            // Connection may be disposed during unmount — best-effort.
-          }
+          if (didChangeTimerRef.current) clearTimeout(didChangeTimerRef.current);
+          didChangeTimerRef.current = setTimeout(() => {
+            lspVersionRef.current += 1;
+            try {
+              lspConnection.sendNotification("textDocument/didChange", {
+                textDocument: {
+                  uri: pathToFileUri(`${projectDir}/${filename}`),
+                  version: lspVersionRef.current,
+                },
+                contentChanges: [{ text: value }],
+              });
+            } catch {
+              // Connection may be disposed during unmount — best-effort.
+            }
+          }, 300);
         }
       }
     },
