@@ -262,35 +262,13 @@ impl ProjectManager {
             });
         }
 
-        // First open: export from Excel and create meta. If the export
-        // fails (non-Windows, Excel not installed, corrupted workbook),
-        // fall back to an empty project so the open flow isn't blocked.
-        //
-        // Exception: actionable errors (wb-null, trust-denied) must
-        // propagate so the frontend can surface a specific dialog —
+        // First open: export from Excel and create meta. All export
+        // errors propagate so the frontend can surface feedback —
         // silently falling back to an empty project leaves the user with
-        // no explanation and no actionable guidance.
-        match Self::export_and_init(&project_id, xlsm_path, &project_dir).await {
-            Ok(info) => Ok(info),
-            Err(e) if {
-                let m = e.to_string();
-                Self::is_wb_null_error(&m) || Self::is_trust_access_error(&m)
-            } =>
-            {
-                Err(Self::classify_com_error(e))
-            }
-            Err(e) => {
-                log::warn!(
-                    "Excel export failed on first open, continuing with empty project: {e}"
-                );
-                Ok(ProjectInfo {
-                    project_id,
-                    xlsm_path: xlsm_path.to_string(),
-                    project_dir: project_dir.to_string_lossy().to_string(),
-                    modules: Vec::new(),
-                })
-            }
-        }
+        // no explanation when their VBA modules don't appear.
+        Self::export_and_init(&project_id, xlsm_path, &project_dir)
+            .await
+            .map_err(Self::classify_com_error)
     }
 
     /// SHA256 of a module's source content, matching the `hash` field in
@@ -499,7 +477,20 @@ impl ProjectManager {
             // Pull the xlsm path out of meta and drop the meta/error before
             // crossing the .await — `Box<dyn Error>` is !Send and would
             // poison the future otherwise.
-            let xlsm_path: Option<String> = Self::read_meta(project_id).ok().map(|m| m.xlsm_path);
+            let meta_path = Self::meta_path(project_id);
+            let xlsm_path: Option<String> = if meta_path.exists() {
+                // Meta exists: a read/parse failure is a real problem — surface it.
+                match Self::read_meta(project_id) {
+                    Ok(meta) => Some(meta.xlsm_path),
+                    Err(e) => {
+                        return Err(format!("project metadata is corrupted: {e}").into());
+                    }
+                }
+            } else {
+                // No meta yet (project never fully opened): skip import but keep
+                // the on-disk write so the user doesn't lose work.
+                None
+            };
 
             if let Some(xlsm_path) = xlsm_path {
                 let source_dir = project_dir.to_string_lossy().to_string();
@@ -511,8 +502,6 @@ impl ProjectManager {
                 // workbook is in sync when it isn't.
                 Self::update_module_hash(project_id, filename, &full_content)?;
             }
-            // No meta yet (project never fully opened): skip import but keep
-            // the on-disk write so the user doesn't lose work.
         }
 
         Ok(())

@@ -5,6 +5,7 @@ interface TabBarProps {
   openModules: ModuleInfo[];
   activeModule: ModuleInfo | null;
   dirtyModules?: ReadonlySet<string>;
+  disabled?: boolean;
   onSelectModule: (module: ModuleInfo) => void;
   onCloseModule: (module: ModuleInfo) => void;
 }
@@ -13,6 +14,7 @@ export function TabBar({
   openModules,
   activeModule,
   dirtyModules,
+  disabled = false,
   onSelectModule,
   onCloseModule,
 }: TabBarProps) {
@@ -45,11 +47,12 @@ export function TabBar({
               background: isActive ? "var(--bg-primary)" : "transparent",
               borderRight: "1px solid var(--border)",
               borderBottom: isActive ? "2px solid var(--accent)" : "2px solid transparent",
-              cursor: "pointer",
+              cursor: disabled ? "wait" : "pointer",
               fontSize: "13px",
               whiteSpace: "nowrap",
+              opacity: disabled ? 0.6 : 1,
             }}
-            onClick={() => onSelectModule(mod)}
+            onClick={() => { if (!disabled) onSelectModule(mod); }}
           >
             <span>{mod.filename}</span>
             <button

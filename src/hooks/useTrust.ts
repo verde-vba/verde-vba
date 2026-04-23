@@ -25,6 +25,8 @@ export function useTrust() {
       await saveSettings({ ...current, trust: { vbaAcknowledged: true } });
     } catch (e) {
       console.error("Failed to persist trust acknowledgement:", e);
+      // Revert so the dialog reappears, giving the user another chance.
+      setAcknowledged(false);
     }
   };
 

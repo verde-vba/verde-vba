@@ -8,6 +8,7 @@ interface LockInfo {
 
 interface LockDialogProps {
   lock: LockInfo;
+  processing?: boolean;
   onOpenReadOnly: () => void;
   onForceOpen: () => void;
   onCancel: () => void;
@@ -15,6 +16,7 @@ interface LockDialogProps {
 
 export function LockDialog({
   lock,
+  processing = false,
   onOpenReadOnly,
   onForceOpen,
   onCancel,
@@ -85,6 +87,7 @@ export function LockDialog({
           <button
             type="button"
             onClick={onCancel}
+            disabled={processing}
             style={{
               padding: "6px 14px",
               background: "transparent",
@@ -92,7 +95,8 @@ export function LockDialog({
               border: "1px solid var(--border)",
               borderRadius: "4px",
               fontSize: "13px",
-              cursor: "pointer",
+              cursor: processing ? "wait" : "pointer",
+              opacity: processing ? 0.6 : 1,
             }}
           >
             {t("lock.cancel")}
@@ -102,6 +106,7 @@ export function LockDialog({
             <button
               type="button"
               onClick={onForceOpen}
+              disabled={processing}
               style={{
                 padding: "6px 14px",
                 background: "transparent",
@@ -109,7 +114,8 @@ export function LockDialog({
                 border: "1px solid var(--error)",
                 borderRadius: "4px",
                 fontSize: "13px",
-                cursor: "pointer",
+                cursor: processing ? "wait" : "pointer",
+                opacity: processing ? 0.6 : 1,
               }}
             >
               {t("lock.forceOpen")}
@@ -117,6 +123,7 @@ export function LockDialog({
             <button
               type="button"
               onClick={onOpenReadOnly}
+              disabled={processing}
               style={{
                 padding: "6px 14px",
                 background: "var(--accent)",
@@ -124,7 +131,8 @@ export function LockDialog({
                 border: "1px solid var(--accent)",
                 borderRadius: "4px",
                 fontSize: "13px",
-                cursor: "pointer",
+                cursor: processing ? "wait" : "pointer",
+                opacity: processing ? 0.6 : 1,
               }}
             >
               {t("lock.openReadOnly")}

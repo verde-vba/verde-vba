@@ -2,6 +2,8 @@
 use std::path::Path;
 #[allow(unused_imports)]
 use std::process::Command;
+#[allow(unused_imports)]
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -327,6 +329,47 @@ try {
 "#
 );
 
+/// Default timeout for PowerShell COM operations. COM calls to Excel
+/// can be slow (large workbooks, network paths, plugin initialization)
+/// but anything beyond 60 seconds indicates a likely hang.
+#[cfg(windows)]
+const PS_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run a pre-configured `Command` with a timeout. Spawns the child
+/// process and waits on a background thread; if the deadline expires,
+/// the process tree is killed via `taskkill /T`.
+#[cfg(windows)]
+fn run_with_timeout(
+    cmd: &mut Command,
+    timeout: Duration,
+) -> Result<std::process::Output, Box<dyn std::error::Error>> {
+    use std::sync::mpsc;
+
+    let child = cmd.spawn()?;
+    let child_id = child.id();
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(result) => Ok(result?),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // Kill the entire process tree (PowerShell + any COM child).
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &child_id.to_string()])
+                .output();
+            Err(format!(
+                "PowerShell operation timed out after {} seconds",
+                timeout.as_secs()
+            )
+            .into())
+        }
+        Err(e) => Err(format!("Failed to wait for PowerShell process: {e}").into()),
+    }
+}
+
 pub struct VbaBridge;
 
 impl VbaBridge {
@@ -336,17 +379,19 @@ impl VbaBridge {
         xlsm_path: &str,
         output_dir: &str,
     ) -> Result<Vec<ExportedModule>, Box<dyn std::error::Error>> {
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                EXPORT_SCRIPT,
-            ])
-            .env("VERDE_XLSM_PATH", xlsm_path)
-            .env("VERDE_OUTPUT_DIR", output_dir)
-            .output()?;
+        let output = run_with_timeout(
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    EXPORT_SCRIPT,
+                ])
+                .env("VERDE_XLSM_PATH", xlsm_path)
+                .env("VERDE_OUTPUT_DIR", output_dir),
+            PS_TIMEOUT,
+        )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -372,18 +417,20 @@ impl VbaBridge {
             .to_string_lossy();
         let module_path_str = module_path.to_string_lossy();
 
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                IMPORT_SCRIPT,
-            ])
-            .env("VERDE_XLSM_PATH", xlsm_path)
-            .env("VERDE_MODULE_NAME", module_name.as_ref())
-            .env("VERDE_MODULE_PATH", module_path_str.as_ref())
-            .output()?;
+        let output = run_with_timeout(
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    IMPORT_SCRIPT,
+                ])
+                .env("VERDE_XLSM_PATH", xlsm_path)
+                .env("VERDE_MODULE_NAME", module_name.as_ref())
+                .env("VERDE_MODULE_PATH", module_path_str.as_ref()),
+            PS_TIMEOUT,
+        )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -407,18 +454,20 @@ impl VbaBridge {
 
         let modules_json = serde_json::to_string(module_filenames)?;
 
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                IMPORT_BATCH_SCRIPT,
-            ])
-            .env("VERDE_XLSM_PATH", xlsm_path)
-            .env("VERDE_SOURCE_DIR", source_dir)
-            .env("VERDE_MODULES_JSON", &modules_json)
-            .output()?;
+        let output = run_with_timeout(
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    IMPORT_BATCH_SCRIPT,
+                ])
+                .env("VERDE_XLSM_PATH", xlsm_path)
+                .env("VERDE_SOURCE_DIR", source_dir)
+                .env("VERDE_MODULES_JSON", &modules_json),
+            PS_TIMEOUT,
+        )?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

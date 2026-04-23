@@ -61,6 +61,8 @@ function App() {
   });
   const {
     lockPrompt,
+    opening,
+    lockProcessing,
     handleCaughtBackendError,
     handleOpenFile,
     handleForceOpen,
@@ -182,6 +184,10 @@ function App() {
         if (!cancelled) {
           setEditorContent("");
           setModuleLoading(false);
+          setErrorBanner({
+            kind: "generic",
+            message: t("errors.moduleReadFailed", { filename: activeModule.filename }),
+          });
         }
       }
     );
@@ -467,6 +473,7 @@ function App() {
             modules={project.modules}
             activeModule={activeModule}
             onSelectModule={handleSelectModule}
+            disabled={moduleLoading}
           />
         )}
 
@@ -480,6 +487,7 @@ function App() {
                 openModules={openModules}
                 activeModule={activeModule}
                 dirtyModules={dirtyModules}
+                disabled={moduleLoading}
                 onSelectModule={handleSelectModule}
                 onCloseModule={handleCloseModuleWithCleanup}
               />
@@ -538,7 +546,7 @@ function App() {
               <Loader />
             </div>
           ) : (
-            <WelcomeScreen onOpenFile={handleOpenFile} />
+            <WelcomeScreen onOpenFile={handleOpenFile} opening={opening} />
           )}
         </div>
       </div>
@@ -625,6 +633,7 @@ function App() {
             machine: lockPrompt.machine,
             time: lockPrompt.time,
           }}
+          processing={lockProcessing}
           onForceOpen={handleForceOpen}
           onOpenReadOnly={handleOpenReadOnly}
           onCancel={handleLockCancel}

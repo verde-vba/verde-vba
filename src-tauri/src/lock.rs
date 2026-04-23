@@ -88,7 +88,13 @@ impl LockManager {
     pub fn read_lock(xlsm_path: &str) -> Option<LockInfo> {
         let lock_path = Self::lock_path(xlsm_path);
         let content = std::fs::read_to_string(&lock_path).ok()?;
-        serde_json::from_str(&content).ok()
+        match serde_json::from_str(&content) {
+            Ok(info) => Some(info),
+            Err(e) => {
+                log::warn!("Corrupted lock file at {}: {e}", lock_path.display());
+                None
+            }
+        }
     }
 
     pub fn acquire(xlsm_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -105,6 +111,11 @@ impl LockManager {
                         format!("File is locked by {} on {}", info.user, info.machine).into(),
                     );
                 }
+            } else {
+                // Lock file exists but is corrupted or unreadable.
+                // Treat as stale and remove to recover.
+                log::warn!("Removing unreadable lock file for {xlsm_path}");
+                let _ = std::fs::remove_file(&lock_path);
             }
         }
 

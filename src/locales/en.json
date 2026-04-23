@@ -111,6 +111,7 @@
     "lspNotSpawned": "Language server (verde-lsp) binary is missing. Run `just fetch-lsp` and reload.",
     "lspSpawnFailed": "Language server (verde-lsp) failed to start. Check that the binary is executable and reload.",
     "lspExited": "Language server (verde-lsp) exited unexpectedly. VBA intelligence is unavailable until you reload.",
-    "lspInitializeFailed": "Language server (verde-lsp) rejected initialization. VBA intelligence is unavailable."
+    "lspInitializeFailed": "Language server (verde-lsp) rejected initialization. VBA intelligence is unavailable.",
+    "moduleReadFailed": "Failed to load module {{filename}}. The file may be missing or unreadable."
   }
 }

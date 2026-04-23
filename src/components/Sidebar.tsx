@@ -6,6 +6,7 @@ interface SidebarProps {
   modules: ModuleInfo[];
   activeModule: ModuleInfo | null;
   onSelectModule: (module: ModuleInfo) => void;
+  disabled?: boolean;
 }
 
 const moduleIcons: Record<string, string> = {
@@ -15,7 +16,7 @@ const moduleIcons: Record<string, string> = {
   document: "📊",
 };
 
-export function Sidebar({ modules, activeModule, onSelectModule }: SidebarProps) {
+export function Sidebar({ modules, activeModule, onSelectModule, disabled = false }: SidebarProps) {
   const { t } = useTranslation();
 
   return (
@@ -61,6 +62,7 @@ export function Sidebar({ modules, activeModule, onSelectModule }: SidebarProps)
               <button
                 key={mod.filename}
                 onClick={() => onSelectModule(mod)}
+                disabled={disabled}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -70,6 +72,8 @@ export function Sidebar({ modules, activeModule, onSelectModule }: SidebarProps)
                   textAlign: "left",
                   background: isActive ? "var(--bg-tertiary)" : "transparent",
                   fontSize: "13px",
+                  opacity: disabled ? 0.6 : 1,
+                  cursor: disabled ? "wait" : "pointer",
                 }}
               >
                 <span>{moduleIcons[typeLabel] ?? "📄"}</span>

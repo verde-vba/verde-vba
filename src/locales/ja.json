@@ -111,6 +111,7 @@
     "lspNotSpawned": "言語サーバー (verde-lsp) のバイナリが見つかりません。`just fetch-lsp` を実行して再読み込みしてください。",
     "lspSpawnFailed": "言語サーバー (verde-lsp) を起動できませんでした。バイナリに実行権限があるか確認して再読み込みしてください。",
     "lspExited": "言語サーバー (verde-lsp) が予期せず終了しました。再読み込みするまで VBA 補完機能は利用できません。",
-    "lspInitializeFailed": "言語サーバー (verde-lsp) が初期化を拒否しました。VBA 補完機能は利用できません。"
+    "lspInitializeFailed": "言語サーバー (verde-lsp) が初期化を拒否しました。VBA 補完機能は利用できません。",
+    "moduleReadFailed": "モジュール {{filename}} の読み込みに失敗しました。ファイルが見つからないか、読み取れない可能性があります。"
   }
 }

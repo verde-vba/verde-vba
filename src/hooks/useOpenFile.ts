@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { type ParsedError, parseBackendError } from "../lib/error-parse";
 
 interface LockPrompt {
@@ -24,6 +24,9 @@ export function useOpenFile({
   fileTypeLabel,
 }: UseOpenFileOptions) {
   const [lockPrompt, setLockPrompt] = useState<LockPrompt | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [lockProcessing, setLockProcessing] = useState(false);
+  const lockGuardRef = useRef(false);
 
   // Bridges parseBackendError with setLockPrompt (for locked) and
   // routeParsedError (for everything else). Centralizing this keeps all
@@ -47,6 +50,8 @@ export function useOpenFile({
   );
 
   const handleOpenFile = useCallback(async () => {
+    if (opening) return;
+    setOpening(true);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const path = await open({
@@ -61,28 +66,40 @@ export function useOpenFile({
     } catch {
       // Dev mode fallback (plugin-dialog only available inside Tauri runtime)
       console.log("File dialog not available outside Tauri");
+    } finally {
+      setOpening(false);
     }
-  }, [openProject, handleCaughtBackendError, fileTypeLabel]);
+  }, [opening, openProject, handleCaughtBackendError, fileTypeLabel]);
 
   const handleForceOpen = useCallback(async () => {
-    if (!lockPrompt) return;
+    if (!lockPrompt || lockGuardRef.current) return;
+    lockGuardRef.current = true;
+    setLockProcessing(true);
     const { xlsmPath } = lockPrompt;
-    setLockPrompt(null);
     try {
       await forceOpenProject(xlsmPath);
     } catch (e) {
       handleCaughtBackendError(e, xlsmPath);
+    } finally {
+      setLockProcessing(false);
+      setLockPrompt(null);
+      lockGuardRef.current = false;
     }
   }, [lockPrompt, forceOpenProject, handleCaughtBackendError]);
 
   const handleOpenReadOnly = useCallback(async () => {
-    if (!lockPrompt) return;
+    if (!lockPrompt || lockGuardRef.current) return;
+    lockGuardRef.current = true;
+    setLockProcessing(true);
     const { xlsmPath } = lockPrompt;
-    setLockPrompt(null);
     try {
       await openProjectReadOnly(xlsmPath);
     } catch (e) {
       handleCaughtBackendError(e, xlsmPath);
+    } finally {
+      setLockProcessing(false);
+      setLockPrompt(null);
+      lockGuardRef.current = false;
     }
   }, [lockPrompt, openProjectReadOnly, handleCaughtBackendError]);
 
@@ -92,6 +109,8 @@ export function useOpenFile({
 
   return {
     lockPrompt,
+    opening,
+    lockProcessing,
     handleCaughtBackendError,
     handleOpenFile,
     handleForceOpen,
