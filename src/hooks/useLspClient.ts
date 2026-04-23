@@ -102,6 +102,16 @@ export function useLspClient(options: UseLspClientOptions): UseLspClientResult {
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
+  // Eagerly spawn the sidecar before Monaco finishes loading. lsp_spawn
+  // is idempotent, so the spawn() call inside the main effect becomes a
+  // fast no-op once the sidecar is already running. This overlaps sidecar
+  // startup with Monaco's async load, shaving ~1-2s off initial readiness.
+  useEffect(() => {
+    if (spawn) {
+      void spawn();
+    }
+  }, [spawn]);
+
   useEffect(() => {
     // Gate on Monaco being loaded — providers need Monaco APIs to register.
     if (!monaco) {
