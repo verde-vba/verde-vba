@@ -21,6 +21,9 @@ import {
 } from "vscode-jsonrpc";
 import type { LspTransport, LspMessage } from "./lsp-bridge";
 
+// Monotonically increasing ID to distinguish concurrent reader/writer pairs.
+let _transportSeq = 0;
+
 export interface LspMessageTransports {
   reader: MessageReader;
   writer: MessageWriter;
@@ -32,14 +35,18 @@ export interface LspMessageTransports {
 class TauriMessageReader extends AbstractMessageReader {
   private transport: LspTransport;
   private unsubscribePromise: Promise<() => void> | null = null;
+  private tid: number;
 
-  constructor(transport: LspTransport) {
+  constructor(transport: LspTransport, tid: number) {
     super();
     this.transport = transport;
+    this.tid = tid;
   }
 
   listen(callback: DataCallback): Disposable {
+    console.log(`[LSP:t${this.tid}:reader] listen() — subscribing to onMessage`, performance.now().toFixed(1));
     this.unsubscribePromise = this.transport.onMessage((message: LspMessage) => {
+      console.log(`[LSP:t${this.tid}:reader] ◀ recv`, message.method ?? `response#${message.id}`, performance.now().toFixed(1));
       // LspMessage is structurally compatible with vscode-jsonrpc's Message.
       // Both require `jsonrpc: string`; the optional id/method/params/result/error
       // fields overlap. A type assertion is safe here.
@@ -48,6 +55,7 @@ class TauriMessageReader extends AbstractMessageReader {
 
     return {
       dispose: () => {
+        console.log(`[LSP:t${this.tid}:reader] listen-disposable.dispose()`, performance.now().toFixed(1));
         void this.unsubscribePromise?.then((off) => off());
         this.unsubscribePromise = null;
       },
@@ -56,11 +64,16 @@ class TauriMessageReader extends AbstractMessageReader {
 
   /** Allow external code to fire the close event (e.g. on sidecar exit). */
   triggerClose(): void {
+    console.log(`[LSP:t${this.tid}:reader] triggerClose()`, performance.now().toFixed(1));
     this.fireClose();
   }
 
   dispose(): void {
-    void this.unsubscribePromise?.then((off) => off());
+    console.log(`[LSP:t${this.tid}:reader] dispose()`, performance.now().toFixed(1));
+    void this.unsubscribePromise?.then((off) => {
+      console.log(`[LSP:t${this.tid}:reader] onMessage unsubscribed`, performance.now().toFixed(1));
+      off();
+    });
     this.unsubscribePromise = null;
     super.dispose();
   }
@@ -68,16 +81,21 @@ class TauriMessageReader extends AbstractMessageReader {
 
 class TauriMessageWriter extends AbstractMessageWriter implements MessageWriter {
   private transport: LspTransport;
+  private tid: number;
 
-  constructor(transport: LspTransport) {
+  constructor(transport: LspTransport, tid: number) {
     super();
     this.transport = transport;
+    this.tid = tid;
   }
 
   async write(msg: Message): Promise<void> {
+    const lspMsg = msg as unknown as LspMessage;
+    console.log(`[LSP:t${this.tid}:writer] ▶ write`, lspMsg.method ?? `response#${lspMsg.id}`, performance.now().toFixed(1));
     try {
-      await this.transport.send(msg as unknown as LspMessage);
+      await this.transport.send(lspMsg);
     } catch (error) {
+      console.error(`[LSP:t${this.tid}:writer] ✕ write error`, lspMsg.method ?? `response#${lspMsg.id}`, error, performance.now().toFixed(1));
       this.fireError(error, msg, 1);
       throw error;
     }
@@ -97,8 +115,10 @@ class TauriMessageWriter extends AbstractMessageWriter implements MessageWriter 
  * hook can trigger its retry logic.
  */
 export function createTransports(transport: LspTransport): LspMessageTransports {
-  const reader = new TauriMessageReader(transport);
-  const writer = new TauriMessageWriter(transport);
+  const tid = ++_transportSeq;
+  console.log(`[LSP:t${tid}] createTransports()`, performance.now().toFixed(1));
+  const reader = new TauriMessageReader(transport, tid);
+  const writer = new TauriMessageWriter(transport, tid);
   return {
     reader,
     writer,

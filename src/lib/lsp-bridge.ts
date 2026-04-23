@@ -63,15 +63,19 @@ export function createTauriLspTransport(
 ): LspTransport {
   return {
     async send(message: LspMessage) {
+      console.log("[LSP:transport] ▶ send", message.method ?? `response#${message.id}`, performance.now().toFixed(1));
       await deps.invoke(LSP_SEND_COMMAND, { message });
+      console.log("[LSP:transport] ✓ send done", message.method ?? `response#${message.id}`, performance.now().toFixed(1));
     },
     async onMessage(handler) {
       return deps.listen<LspMessage>(LSP_MESSAGE_EVENT, (event) => {
+        console.log("[LSP:transport] ◀ recv", event.payload.method ?? `response#${event.payload.id}`, performance.now().toFixed(1));
         handler(event.payload);
       });
     },
     async onExit(handler) {
       return deps.listen<LspExitPayload>(LSP_EXIT_EVENT, (event) => {
+        console.log("[LSP:transport] ✕ exit", event.payload, performance.now().toFixed(1));
         handler(event.payload);
       });
     },
