@@ -35,6 +35,13 @@ interface EditorProps {
   /// as `rootUri` in the LSP initialize request so verde-lsp can find VBA
   /// source files.
   projectDir?: string;
+  /// Called when go-to-definition targets a different file. The host
+  /// should switch to the target module's tab and optionally scroll to
+  /// the given position.
+  onNavigateToModule?: (filename: string, lineNumber?: number, column?: number) => void;
+  /// Mutable ref holding the position to reveal after a cross-file
+  /// navigation. The Editor consumes and clears it on mount.
+  pendingRevealRef?: { current: { lineNumber: number; column: number } | null };
 }
 
 export function Editor({
@@ -52,6 +59,8 @@ export function Editor({
   onLspLoadError,
   onLspStatusChange,
   projectDir,
+  onNavigateToModule,
+  pendingRevealRef,
 }: EditorProps) {
   const { t } = useTranslation();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -116,6 +125,41 @@ export function Editor({
     onLspStatusChange?.(lspStatus);
   }, [lspStatus, onLspStatusChange]);
 
+  // ── Cross-file navigation via go-to-definition ──
+  // Standalone Monaco cannot open a different model in the editor by
+  // default. We register an EditorOpener that intercepts the navigation
+  // and delegates to the host's tab-switching logic.
+  useEffect(() => {
+    if (!monaco || !onNavigateToModule) return;
+
+    const disposable = monaco.editor.registerEditorOpener({
+      openCodeEditor(_source, resource, selectionOrPosition) {
+        const parts = resource.path.split("/");
+        const targetFilename = parts[parts.length - 1];
+        if (!targetFilename) return false;
+
+        let lineNumber: number | undefined;
+        let column: number | undefined;
+        if (selectionOrPosition) {
+          if ("startLineNumber" in selectionOrPosition) {
+            const r = selectionOrPosition as import("monaco-editor").IRange;
+            lineNumber = r.startLineNumber;
+            column = r.startColumn;
+          } else {
+            const p = selectionOrPosition as import("monaco-editor").IPosition;
+            lineNumber = p.lineNumber;
+            column = p.column;
+          }
+        }
+
+        onNavigateToModule(targetFilename, lineNumber, column);
+        return true;
+      },
+    });
+
+    return () => disposable.dispose();
+  }, [monaco, onNavigateToModule]);
+
   const handleBeforeMount = useCallback(
     (monaco: typeof import("monaco-editor")) => {
       registerVbaLanguage(monaco);
@@ -132,6 +176,16 @@ export function Editor({
   const handleMount = useCallback(
     (editor: editor.IStandaloneCodeEditor) => {
       editorRef.current = editor;
+
+      // Consume pending reveal position from cross-file navigation.
+      const reveal = pendingRevealRef?.current;
+      if (reveal) {
+        pendingRevealRef.current = null;
+        requestAnimationFrame(() => {
+          editor.setPosition(reveal);
+          editor.revealPositionInCenter(reveal);
+        });
+      }
 
       editor.addAction({
         id: "verde.save",
@@ -207,7 +261,7 @@ export function Editor({
         language={VBA_LANGUAGE_ID}
         theme={theme === "dark" ? "vs-dark" : "vs"}
         value={content}
-        path={filename}
+        path={projectDir ? pathToFileUri(`${projectDir}/${filename}`) : filename}
         beforeMount={handleBeforeMount}
         onMount={handleMount}
         onChange={handleChange}

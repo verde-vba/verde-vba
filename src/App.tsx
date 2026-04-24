@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useMonaco } from "@monaco-editor/react";
 import { Banner } from "./components/Banner";
 import { ConflictDialog } from "./components/ConflictDialog";
 import { Editor } from "./components/Editor";
@@ -23,6 +24,7 @@ import { useSave } from "./hooks/useSave";
 import { useTheme } from "./hooks/useTheme";
 import { useTrust } from "./hooks/useTrust";
 import { useVerdeProject } from "./hooks/useVerdeProject";
+import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { toI18nKey } from "./lib/error-parse";
 import { saveHotExit, loadHotExit, clearHotExit } from "./lib/hot-exit";
 
@@ -43,6 +45,13 @@ function App() {
     resolveConflict,
     resolveConflictPerModule,
   } = useVerdeProject();
+  const monaco = useMonaco();
+  useWorkspaceModels(
+    monaco,
+    project?.project_id ?? null,
+    project?.project_dir ?? null,
+    project?.modules ?? null,
+  );
   const {
     acknowledged: trustAcknowledged,
     acknowledge: acknowledgeTrust,
@@ -409,6 +418,21 @@ function App() {
     });
   }, [openProject, handleCaughtBackendError]);
 
+  // ── Cross-file navigation (go-to-definition across modules) ──
+  const pendingRevealRef = useRef<{ lineNumber: number; column: number } | null>(null);
+
+  const handleNavigateToModule = useCallback(
+    (filename: string, lineNumber?: number, column?: number) => {
+      const mod = project?.modules?.find((m) => m.filename === filename);
+      if (mod) {
+        pendingRevealRef.current =
+          lineNumber != null ? { lineNumber, column: column ?? 1 } : null;
+        handleSelectModule(mod);
+      }
+    },
+    [project, handleSelectModule],
+  );
+
   const handleTrustClose = useCallback(() => {
     void acknowledgeTrust();
   }, [acknowledgeTrust]);
@@ -522,6 +546,8 @@ function App() {
                   projectDir={project?.project_dir}
                   onSave={handleSaveAndTrack}
                   onChange={handleEditorChange}
+                  onNavigateToModule={handleNavigateToModule}
+                  pendingRevealRef={pendingRevealRef}
                   onTreeSitterLoadError={() =>
                     setErrorBanner({
                       kind: "generic",
