@@ -1,4 +1,5 @@
 pub mod cli;
+mod com_dispatch;
 mod commands;
 pub mod conflict;
 mod file_watcher;
