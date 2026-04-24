@@ -68,13 +68,14 @@ fn vba_body_offset(source: &str) -> usize {
     pos
 }
 
+use crate::com_dispatch::VbaBridgeError;
 use crate::settings::Settings;
 use crate::vba_bridge::VbaBridge;
 
-/// Locale-agnostic classification of a COM HRESULT extracted from the PS
-/// catch block's stderr. Sprint 25 / PBI #17: the legacy substring matcher
-/// in `EXCEL_OPEN_SUBSTRINGS` only catches English-locale wording; feeding
-/// classification off HRESULT bypasses that limitation entirely.
+/// Locale-agnostic classification of a COM HRESULT.
+///
+/// With the windows-rs COM bridge, HRESULT values are available directly
+/// from `VbaBridgeError::Com(hr)` — no string parsing needed.
 ///
 /// The variants intentionally cover only the kinds Verde currently branches
 /// on. Anything unrecognised goes into `Unknown(i32)` so diagnostics can
@@ -300,85 +301,10 @@ impl ProjectManager {
         Self::write_meta(project_id, &meta)
     }
 
-    /// Substrings (case-insensitive) that identify an import failure as
-    /// "Excel has the workbook open". Extracted from `classify_import_error`
-    /// in Sprint 18 / PBI #4 so the fragile magic strings are greppable and
-    /// one-doc-comment away from the i18n limitation they imply.
-    ///
-    /// **Known limitation**: these strings are the English-locale wording of
-    /// PowerShell / COM exceptions. On a Japanese-locale Excel the message
-    /// becomes e.g. "別のプロセスで使用されているため" and this list misses
-    /// it entirely — the UI will then see a generic error instead of the
-    /// EXCEL_OPEN-prefixed one that triggers the "close Excel and retry"
-    /// dialog. Follow-up #17 tracks the robust fix: branch on COM HRESULT
-    /// (`0x80070020` / `ERROR_SHARING_VIOLATION`) which is locale-agnostic.
-    /// Until then, non-English locales will get the raw error text.
-    const EXCEL_OPEN_SUBSTRINGS: &[&str] = &[
-        "being used by another process",
-        "another user",
-        "is locked",
-        "currently in use",
-        "already open",
-    ];
-
-    /// Pure classification: returns `true` if the captured stderr/message
-    /// indicates Excel is holding the workbook open.
-    ///
-    /// Sprint 25 / PBI #17: the HRESULT tag path runs first and is locale
-    /// -agnostic — as long as the PS catch block emitted `VERDE_HRESULT=...`
-    /// and the code lands in `EXCEL_OPEN_HRESULTS`, we win regardless of
-    /// UI language. The English-substring fallback stays in place for
-    /// error surfaces that don't (yet) ride through the catch block —
-    /// e.g. non-Windows diagnostics and any PS failure path not wrapped
-    /// in try/catch. Sprint 25 Tidy-after will revisit removal once we
-    /// have evidence that every real-world failure emits the tag.
-    pub(crate) fn is_excel_open_error(err_msg: &str) -> bool {
-        if let Some(hresult) = Self::parse_hresult_tag(err_msg) {
-            if Self::classify_hresult(hresult) == ErrorKind::ExcelOpen {
-                return true;
-            }
-        }
-        let lower = err_msg.to_lowercase();
-        Self::EXCEL_OPEN_SUBSTRINGS
-            .iter()
-            .any(|needle| lower.contains(needle))
-    }
-
-    /// Parse a `VERDE_HRESULT=0x...` (or decimal) tag line emitted by the
-    /// PS script's catch block. Returns the first HRESULT value found.
-    ///
-    /// Sprint 25 / PBI #17. The PS side emits the tag to stderr via
-    /// `[Console]::Error.WriteLine("VERDE_HRESULT=0x{0:X8}" -f $h)`; the
-    /// Rust caller forwards the captured stderr here.
-    ///
-    /// Accepts both the canonical hex form (`0x80070020`) and a decimal
-    /// form (`-2147024864`) so the contract stays robust against future PS
-    /// formatter drift. Only the first matching line wins — PS wrappers
-    /// occasionally duplicate the line, and those duplicates carry no new
-    /// information.
-    pub(crate) fn parse_hresult_tag(stderr: &str) -> Option<i32> {
-        for line in stderr.lines() {
-            let trimmed = line.trim();
-            let Some(rest) = trimmed.strip_prefix("VERDE_HRESULT=") else {
-                continue;
-            };
-            let rest = rest.trim();
-            if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
-                if let Ok(n) = u32::from_str_radix(hex, 16) {
-                    return Some(n as i32);
-                }
-            } else if let Ok(n) = rest.parse::<i32>() {
-                return Some(n);
-            }
-        }
-        None
-    }
-
     /// Map a HRESULT integer to Verde's classification enum.
     ///
-    /// Pure function — no locale, no I/O. Intentional: keeps the wiring
-    /// trivial (PS emits -> parse_hresult_tag -> classify_hresult -> branch)
-    /// and makes macOS-side TDD viable without real COM.
+    /// Pure function — no locale, no I/O. Used by `classify_com_error`
+    /// to branch on the HRESULT carried by `VbaBridgeError::Com(hr)`.
     pub(crate) fn classify_hresult(hresult: i32) -> ErrorKind {
         if EXCEL_OPEN_HRESULTS.contains(&hresult) {
             ErrorKind::ExcelOpen
@@ -391,51 +317,43 @@ impl ProjectManager {
         }
     }
 
-    /// Pure classification: returns `true` if the captured stderr/message
-    /// indicates the workbook reference is null after connection attempt.
+    /// Classify an import/export failure using structural error types.
     ///
-    /// The PS `vbproject_guard!` macro writes `VERDE_WB_NULL` to stderr
-    /// when `$wb` is null after `excel_connect!`.
-    pub(crate) fn is_wb_null_error(err_msg: &str) -> bool {
-        err_msg.contains("VERDE_WB_NULL")
-    }
-
-    /// Pure classification: returns `true` if the captured stderr/message
-    /// indicates the VBProject is inaccessible because the Excel Trust Center
-    /// setting "Trust access to the VBA project object model" is disabled.
-    ///
-    /// The PS `vbproject_guard!` macro writes `VERDE_TRUST_DENIED` to stderr
-    /// before throwing, giving us a locale-agnostic detection path.
-    pub(crate) fn is_trust_access_error(err_msg: &str) -> bool {
-        err_msg.contains("VERDE_TRUST_DENIED")
-    }
-
-    /// Classify an import/export failure. Checks the most specific markers
-    /// first (wb-null, trust-denied), then Excel-open.
+    /// With the windows-rs COM bridge, errors carry their classification
+    /// directly as `VbaBridgeError` variants — no string parsing needed.
+    /// The most specific markers are checked first (workbook-null,
+    /// trust-denied), then HRESULT-based Excel-open detection.
     /// Non-matching errors pass through unchanged.
     fn classify_com_error(err: Box<dyn std::error::Error>) -> Box<dyn std::error::Error> {
-        let msg = err.to_string();
-        if Self::is_wb_null_error(&msg) {
-            format!(
-                "{}: Workbook could not be opened. Excel may have the file locked or the path could not be resolved.",
-                EXCEL_OPEN_MARKER
-            )
-            .into()
-        } else if Self::is_trust_access_error(&msg) {
-            format!(
-                "{}: VBProject is not accessible. Enable 'Trust access to the VBA project object model' in Excel settings.",
-                TRUST_ACCESS_MARKER
-            )
-            .into()
-        } else if Self::is_excel_open_error(&msg) {
-            format!(
-                "{}: Excel appears to have the workbook open. Close it and retry. ({})",
-                EXCEL_OPEN_MARKER, msg
-            )
-            .into()
-        } else {
-            err
+        if let Some(bridge_err) = err.downcast_ref::<VbaBridgeError>() {
+            match bridge_err {
+                VbaBridgeError::WorkbookNull => {
+                    return format!(
+                        "{}: Workbook could not be opened. Excel may have the file locked or the path could not be resolved.",
+                        EXCEL_OPEN_MARKER
+                    )
+                    .into();
+                }
+                VbaBridgeError::TrustDenied => {
+                    return format!(
+                        "{}: VBProject is not accessible. Enable 'Trust access to the VBA project object model' in Excel settings.",
+                        TRUST_ACCESS_MARKER
+                    )
+                    .into();
+                }
+                VbaBridgeError::Com(hr)
+                    if Self::classify_hresult(*hr) == ErrorKind::ExcelOpen =>
+                {
+                    return format!(
+                        "{}: Excel appears to have the workbook open. Close it and retry. (HRESULT 0x{:08X})",
+                        EXCEL_OPEN_MARKER, hr
+                    )
+                    .into();
+                }
+                _ => {}
+            }
         }
+        err
     }
 
     pub async fn save_module(
@@ -940,78 +858,7 @@ mod tests {
         assert!(got.is_empty());
     }
 
-    // --- Sprint 18 / PBI #4: is_excel_open_error ---
-
-    #[test]
-    fn is_excel_open_error_matches_each_known_english_substring() {
-        // Pin every substring individually so a future edit that deletes
-        // one without deleting its matching test is caught immediately.
-        assert!(ProjectManager::is_excel_open_error(
-            "file is being used by another process"
-        ));
-        assert!(ProjectManager::is_excel_open_error(
-            "locked for editing by another user"
-        ));
-        assert!(ProjectManager::is_excel_open_error(
-            "the workbook is locked"
-        ));
-        assert!(ProjectManager::is_excel_open_error(
-            "resource currently in use"
-        ));
-        assert!(ProjectManager::is_excel_open_error(
-            "the file is already open"
-        ));
-    }
-
-    #[test]
-    fn is_excel_open_error_case_insensitive() {
-        assert!(ProjectManager::is_excel_open_error(
-            "FILE IS BEING USED BY ANOTHER PROCESS"
-        ));
-        assert!(ProjectManager::is_excel_open_error(
-            "AnOtHeR UsEr holds this workbook"
-        ));
-    }
-
-    #[test]
-    fn is_excel_open_error_rejects_unrelated_errors() {
-        assert!(!ProjectManager::is_excel_open_error(
-            "VBA bridge requires Windows with Excel installed"
-        ));
-        assert!(!ProjectManager::is_excel_open_error(
-            "Module1.bas: syntax error at line 3"
-        ));
-        assert!(!ProjectManager::is_excel_open_error(""));
-    }
-
-    // --- Sprint 25 / PBI #17: parse_hresult_tag (pure) ---
-
-    #[test]
-    fn parse_hresult_tag_reads_uppercase_hex_form() {
-        // Canonical shape emitted by PS `"0x{0:X8}" -f $h`.
-        let stderr = "Exception: boom\nVERDE_HRESULT=0x80070020\n";
-        let got = ProjectManager::parse_hresult_tag(stderr);
-        assert_eq!(got, Some(0x80070020u32 as i32));
-    }
-
-    #[test]
-    fn parse_hresult_tag_reads_decimal_form_for_formatter_drift_resilience() {
-        // If PS ever emits the raw i32 instead of the X8 form, we still
-        // want the contract to hold — HResult is a signed 32-bit int.
-        let stderr = "VERDE_HRESULT=-2147024864\n";
-        let got = ProjectManager::parse_hresult_tag(stderr);
-        assert_eq!(got, Some(-2147024864));
-    }
-
-    #[test]
-    fn parse_hresult_tag_returns_none_when_tag_absent() {
-        // Arbitrary stderr without the tag must not be matched by accident.
-        let stderr = "Some unrelated PowerShell error text\n0x80070020 appears here\n";
-        assert_eq!(ProjectManager::parse_hresult_tag(stderr), None);
-        assert_eq!(ProjectManager::parse_hresult_tag(""), None);
-    }
-
-    // --- Sprint 25 / PBI #17: classify_hresult (pure) ---
+    // --- classify_hresult (pure) ---
 
     #[test]
     fn classify_hresult_maps_sharing_violation_to_excel_open() {
@@ -1046,70 +893,60 @@ mod tests {
         assert_eq!(ProjectManager::classify_hresult(raw), ErrorKind::Unknown(raw));
     }
 
-    #[test]
-    fn is_excel_open_error_ignores_hresult_tag_for_unrelated_codes() {
-        // E_ACCESSDENIED (0x80070005) is a separate failure mode, not
-        // Excel-holding-the-file. A tag carrying it must not flip the
-        // classifier into Excel-open — otherwise every permission error
-        // would erroneously prompt "close Excel and retry".
-        let stderr = "Access is denied.\nVERDE_HRESULT=0x80070005\n";
-        assert!(!ProjectManager::is_excel_open_error(stderr));
-    }
+    // --- classify_com_error with VbaBridgeError ---
 
     #[test]
-    fn is_excel_open_error_falls_back_to_substring_when_tag_absent() {
-        // PS failure paths that exit before entering the try block never
-        // emit VERDE_HRESULT. The English-substring fallback must still
-        // classify those cases — otherwise removing the fallback in a
-        // future refactor would silently drop real Excel-open detections.
-        let stderr_without_tag = "The workbook is being used by another process.";
-        assert!(ProjectManager::is_excel_open_error(stderr_without_tag));
-    }
-
-    #[test]
-    fn is_excel_open_error_detects_japanese_locale_via_hresult_tag() {
-        // Sprint 25 / PBI #17: the Sprint-18 pinned-negative is flipped.
-        // A Japanese-locale COM error arrives with localised prose that
-        // never matches EXCEL_OPEN_SUBSTRINGS, but the PS catch block now
-        // appends `VERDE_HRESULT=0x80070020` to stderr. The classifier must
-        // detect Excel-open via the HRESULT tag and ignore locale entirely.
-        //
-        // If this test regresses, the Japanese-locale EXCEL_OPEN dialog
-        // silently goes missing again — the exact outcome Sprint 18 pinned
-        // as a known miss.
-        let ja_with_tag = "ファイル 'sales.xlsm' は別のプロセスで使用されているため、アクセスできません。\nVERDE_HRESULT=0x80070020\n";
+    fn classify_com_error_maps_workbook_null_to_excel_open_marker() {
+        let err: Box<dyn std::error::Error> = VbaBridgeError::WorkbookNull.into();
+        let classified = ProjectManager::classify_com_error(err);
+        let msg = classified.to_string();
         assert!(
-            ProjectManager::is_excel_open_error(ja_with_tag),
-            "Japanese-locale error must be classified via the VERDE_HRESULT \
-             tag emitted by the PS catch block (locale-agnostic path)."
+            msg.starts_with(EXCEL_OPEN_MARKER),
+            "WorkbookNull should map to EXCEL_OPEN marker, got: {msg}"
         );
     }
 
-    // --- is_trust_access_error ---
-
     #[test]
-    fn is_trust_access_error_detects_verde_trust_denied_tag() {
-        // The PS vbproject_guard! writes VERDE_TRUST_DENIED to stderr before
-        // throwing. The classifier must detect it regardless of surrounding text.
-        let stderr = "Cannot access VBProject.\nVERDE_TRUST_DENIED\nVERDE_HRESULT=0x80131501\n";
-        assert!(ProjectManager::is_trust_access_error(stderr));
+    fn classify_com_error_maps_trust_denied_to_trust_access_marker() {
+        let err: Box<dyn std::error::Error> = VbaBridgeError::TrustDenied.into();
+        let classified = ProjectManager::classify_com_error(err);
+        let msg = classified.to_string();
+        assert!(
+            msg.starts_with(TRUST_ACCESS_MARKER),
+            "TrustDenied should map to TRUST_ACCESS marker, got: {msg}"
+        );
     }
 
     #[test]
-    fn is_trust_access_error_rejects_unrelated_errors() {
-        assert!(!ProjectManager::is_trust_access_error(
-            "VERDE_HRESULT=0x80070020\nfile is being used by another process"
-        ));
-        assert!(!ProjectManager::is_trust_access_error(""));
+    fn classify_com_error_maps_sharing_violation_hresult_to_excel_open_marker() {
+        let err: Box<dyn std::error::Error> =
+            VbaBridgeError::Com(0x80070020u32 as i32).into();
+        let classified = ProjectManager::classify_com_error(err);
+        let msg = classified.to_string();
+        assert!(
+            msg.starts_with(EXCEL_OPEN_MARKER),
+            "HRESULT 0x80070020 should map to EXCEL_OPEN marker, got: {msg}"
+        );
     }
 
     #[test]
-    fn is_trust_access_error_takes_priority_over_excel_open_when_both_present() {
-        // Edge case: both markers in the same stderr output. Trust-denied
-        // is more specific and must win — it tells the user to fix the
-        // Trust Center setting, not to close Excel.
-        let stderr = "VERDE_TRUST_DENIED\nbeing used by another process\nVERDE_HRESULT=0x80131501\n";
-        assert!(ProjectManager::is_trust_access_error(stderr));
+    fn classify_com_error_passes_through_unrecognised_hresult() {
+        let hr = 0x800A03ECu32 as i32;
+        let err: Box<dyn std::error::Error> = VbaBridgeError::Com(hr).into();
+        let classified = ProjectManager::classify_com_error(err);
+        let msg = classified.to_string();
+        assert!(
+            !msg.starts_with(EXCEL_OPEN_MARKER) && !msg.starts_with(TRUST_ACCESS_MARKER),
+            "Unrecognised HRESULT should pass through unchanged, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn classify_com_error_passes_through_non_bridge_errors() {
+        let err: Box<dyn std::error::Error> = "some other error".into();
+        let classified = ProjectManager::classify_com_error(err);
+        let msg = classified.to_string();
+        assert_eq!(msg, "some other error");
     }
 
     #[test]
