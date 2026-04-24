@@ -133,6 +133,8 @@ async function sendRequestWithTimeout<T>(
   timeoutMs: number = REQUEST_TIMEOUT_MS,
   monacoToken?: import("monaco-editor").CancellationToken,
 ): Promise<T | null> {
+  const t0 = performance.now();
+  console.log(`[LSP:provider] ▶ ${method}`, params);
   const cts = new CancellationTokenSource();
   const timer = setTimeout(() => cts.cancel(), timeoutMs);
 
@@ -142,8 +144,12 @@ async function sendRequestWithTimeout<T>(
 
   try {
     const result = await connection.sendRequest<T>(method, params, cts.token);
+    const elapsed = (performance.now() - t0).toFixed(1);
+    console.log(`[LSP:provider] ◀ ${method} OK (${elapsed}ms)`, result);
     return result;
-  } catch {
+  } catch (err) {
+    const elapsed = (performance.now() - t0).toFixed(1);
+    console.warn(`[LSP:provider] ✕ ${method} FAILED (${elapsed}ms)`, err);
     return null;
   } finally {
     clearTimeout(timer);
@@ -491,6 +497,7 @@ export function registerLspProviders(
 ): IDisposable[] {
   const { resolveDocumentUri } = options;
   const disposables: IDisposable[] = [];
+  console.log(`[LSP:provider] registerLspProviders — languageId=${languageId}`);
 
   // ── Completion ──
   disposables.push(
@@ -791,23 +798,33 @@ export function registerLspProviders(
   const diagDisposable = connection.onNotification(
     "textDocument/publishDiagnostics",
     (params: LspPublishDiagnosticsParams) => {
+      console.log(`[LSP:provider] ◀ publishDiagnostics uri=${params.uri} count=${params.diagnostics.length}`, params.diagnostics);
       // Find Monaco models whose URI matches the diagnostic source.
       // In our 1-xlsm = 1-process model there is typically one model,
       // but we iterate defensively.
-      for (const model of monaco.editor.getModels()) {
+      const models = monaco.editor.getModels();
+      console.log(`[LSP:provider] available models: ${models.map(m => m.uri.toString()).join(", ")}`);
+      let matched = false;
+      for (const model of models) {
         const modelLspUri = resolveDocumentUri(model.uri.toString());
         if (modelLspUri === params.uri) {
+          console.log(`[LSP:provider] matched model ${model.uri.toString()} → setting ${params.diagnostics.length} markers`);
           monaco.editor.setModelMarkers(
             model,
             "verde-lsp",
             params.diagnostics.map(toMonacoMarker),
           );
+          matched = true;
           break;
         }
+      }
+      if (!matched) {
+        console.warn(`[LSP:provider] publishDiagnostics: no matching model for uri=${params.uri}`);
       }
     },
   );
   disposables.push({ dispose: () => diagDisposable.dispose() });
 
+  console.log(`[LSP:provider] registered ${disposables.length} providers`);
   return disposables;
 }

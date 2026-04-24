@@ -144,10 +144,18 @@ pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Res
         let sidecar = app
             .shell()
             .sidecar("verde-lsp")
-            .map_err(|e| format!("sidecar lookup failed: {e}"))?;
+            .map_err(|e| {
+                eprintln!("[lsp_sidecar] sidecar lookup FAILED: {}", e);
+                format!("sidecar lookup failed: {e}")
+            })?;
+        eprintln!("[lsp_sidecar] sidecar command created, now spawning…");
         let (rx, child) = sidecar
             .spawn()
-            .map_err(|e| format!("sidecar spawn failed: {e}"))?;
+            .map_err(|e| {
+                eprintln!("[lsp_sidecar] sidecar spawn FAILED: {}", e);
+                format!("sidecar spawn failed: {e}")
+            })?;
+        eprintln!("[lsp_sidecar] sidecar process spawned successfully (pid={})", child.pid());
         *guard = Some(child);
         rx
     };
@@ -159,20 +167,35 @@ pub async fn lsp_spawn(app: AppHandle, state: State<'_, LspSidecarState>) -> Res
             match event {
                 CommandEvent::Stdout(bytes) => {
                     eprintln!("[lsp_sidecar] stdout chunk: {} bytes, buf_before={}", bytes.len(), buf.len());
+                    // [DEBUG] バイト列の先頭を表示 (Content-Lengthヘッダの確認用)
+                    if let Ok(preview) = std::str::from_utf8(&bytes[..bytes.len().min(120)]) {
+                        eprintln!("[lsp_sidecar] stdout preview: {:?}", preview);
+                    }
                     buf.extend_from_slice(&bytes);
                     let frames = parse_frames(&mut buf);
-                    for msg in &frames {
+                    eprintln!("[lsp_sidecar] parsed {} frames, buf_after={}", frames.len(), buf.len());
+                    for (i, msg) in frames.iter().enumerate() {
                         let method = msg.get("method").and_then(|v| v.as_str());
                         let id = msg.get("id");
                         let is_error = msg.get("error").is_some();
+                        let has_result = msg.get("result").is_some();
                         eprintln!(
-                            "[lsp_sidecar] → emit lsp://message  method={:?} id={:?} is_error={}",
-                            method, id, is_error
+                            "[lsp_sidecar] → emit lsp://message [{}/{}] method={:?} id={:?} is_error={} has_result={}",
+                            i + 1, frames.len(), method, id, is_error, has_result
                         );
+                        // [DEBUG] エラーの場合はエラー内容も表示
+                        if is_error {
+                            if let Some(err) = msg.get("error") {
+                                eprintln!("[lsp_sidecar]   error detail: {}", err);
+                            }
+                        }
                         let _ = app_handle.emit(LSP_MESSAGE_EVENT, msg);
                     }
-                    if frames.is_empty() && buf.len() > 0 {
+                    if frames.is_empty() && !buf.is_empty() {
                         eprintln!("[lsp_sidecar] stdout: incomplete frame, buf_remaining={}", buf.len());
+                        if let Ok(preview) = std::str::from_utf8(&buf[..buf.len().min(80)]) {
+                            eprintln!("[lsp_sidecar] buf preview: {:?}", preview);
+                        }
                     }
                 }
                 CommandEvent::Terminated(payload) => {
@@ -247,9 +270,19 @@ pub async fn lsp_send(
     let id = message.get("id").cloned();
     let frame = encode_frame(&message);
     eprintln!(
-        "[lsp_sidecar] lsp_send: method={:?} id={:?} frame_len={}",
-        method, id, frame.len()
+        "[lsp_sidecar] lsp_send: method={:?} id={:?} frame_len={} jsonrpc={:?}",
+        method, id, frame.len(),
+        message.get("jsonrpc").and_then(|v| v.as_str()),
     );
+    // [DEBUG] params の概要を表示
+    if let Some(params) = message.get("params") {
+        let params_str = serde_json::to_string(params).unwrap_or_default();
+        if params_str.len() > 200 {
+            eprintln!("[lsp_sidecar] lsp_send params (truncated): {}…", &params_str[..params_str.floor_char_boundary(200)]);
+        } else {
+            eprintln!("[lsp_sidecar] lsp_send params: {}", params_str);
+        }
+    }
     let mut guard = state.child.lock().expect("lsp sidecar mutex poisoned");
     let child = guard
         .as_mut()
