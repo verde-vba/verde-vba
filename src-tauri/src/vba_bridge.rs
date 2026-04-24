@@ -1,13 +1,11 @@
 #[allow(unused_imports)]
 use std::path::Path;
 #[allow(unused_imports)]
-use std::process::Command;
-#[allow(unused_imports)]
 use std::time::Duration;
 
 use serde::Deserialize;
 
-/// A module entry returned by the PowerShell export script.
+/// A module entry returned by the export operation.
 /// Contains the filename (e.g. "Module1.bas") and the COM
 /// `VBComponent.Type` code (1=standard, 2=class, 3=form, 100=document).
 #[derive(Debug, Deserialize)]
@@ -17,431 +15,370 @@ pub(crate) struct ExportedModule {
     pub module_type: u32,
 }
 
-/// Sprint 23 / PBI #15 — structural fix for PS injection.
-///
-/// The PS scripts below are **fully static**: caller data (xlsm path,
-/// output dir, module name/path) is NEVER concatenated into the script
-/// body. Instead, values ride the OS env-var channel via
-/// `Command::env("VERDE_*", ...)` and the script reads them back as
-/// `$env:VERDE_*`. Because the script text is a compile-time constant,
-/// there is no injection surface to mitigate — hence no validator, no
-/// denylist. Unicode paths (e.g. Japanese filenames) previously blocked
-/// by the Sprint-18 denylist now pass through untouched.
-///
-/// Env-var naming uses the `VERDE_` prefix to avoid collisions with any
-/// env var the operator or a parent process might already have set.
-/// PS `catch` block: emit the COM HRESULT as a locale-agnostic tag on
-/// stderr so the Rust classifier can branch off the numeric code rather
-/// than localised prose. Sprint 25 / PBI #17 — see `parse_hresult_tag` +
-/// `classify_hresult` in `project.rs` for the consumer side.
-///
-/// We prefer `InnerException.HResult` when present because COM failures
-/// typically surface via a wrapping `TargetInvocationException`; falling
-/// back to `Exception.HResult` covers the direct-throw path. `throw` at
-/// the end re-raises so the process still exits non-zero — the tag is
-/// additive diagnostic output, not a swallow.
+// ── Windows-only: direct COM via windows-rs ─────────────────────────
+
 #[cfg(windows)]
-macro_rules! hresult_catch {
-    () => {
-        r#"
-} catch {
-    $h = 0
-    if ($_.Exception) {
-        if ($_.Exception.InnerException -and $_.Exception.InnerException.HResult) {
-            $h = $_.Exception.InnerException.HResult
-        } elseif ($_.Exception.HResult) {
-            $h = $_.Exception.HResult
+use crate::com_dispatch::{
+    create_instance, get_active_object, run_on_sta_thread, system_encoding, variant_bstr,
+    DispatchObject, VbaBridgeError,
+};
+
+/// Timeout for COM operations. COM calls to Excel can be slow (large
+/// workbooks, network paths, plugin initialisation) but anything beyond
+/// 60 seconds indicates a likely hang.
+#[cfg(windows)]
+const COM_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Excel COM session — tracks ownership so cleanup only closes/quits
+/// resources that this session opened.
+#[cfg(windows)]
+struct ExcelSession {
+    excel: DispatchObject,
+    wb: DispatchObject,
+    own_excel: bool,
+    own_wb: bool,
+    saved_alerts: bool,
+}
+
+/// Connect to an existing Excel instance and find (or open) the
+/// workbook. Falls back to creating a new Excel instance when needed.
+///
+/// Mirrors the logic of the old `excel_connect!` PowerShell macro:
+/// 1. Try `GetActiveObject("Excel.Application")`
+/// 2. Search running workbooks by FullName match
+/// 3. Open the workbook if not found
+/// 4. Same-name conflict fallback: create dedicated instance
+#[cfg(windows)]
+fn excel_connect(xlsm_path: &str) -> Result<ExcelSession, VbaBridgeError> {
+    let xlsm_full = std::fs::canonicalize(xlsm_path)
+        .map_err(|e| VbaBridgeError::Other(format!("Failed to canonicalize path: {e}")))?;
+    let xlsm_full_str = xlsm_full.to_string_lossy();
+    // Strip \\?\ prefix added by canonicalize on Windows.
+    let xlsm_full_str = xlsm_full_str
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&xlsm_full_str);
+
+    let mut own_excel = false;
+    let mut own_wb = false;
+
+    // Step 1: Try to reuse a running Excel instance.
+    let excel = match get_active_object("Excel.Application") {
+        Ok(e) => e,
+        Err(_) => {
+            own_excel = true;
+            let e = create_instance("Excel.Application")?;
+            e.put_bool("Visible", false)?;
+            e
         }
-    }
-    [Console]::Error.WriteLine(("VERDE_HRESULT=0x{0:X8}" -f $h))
-    throw
-"#
     };
-}
 
-/// Null-guards for `$wb` and `$wb.VBProject` after `excel_connect!`.
-///
-/// Two distinct failure modes require separate diagnostics:
-///
-/// 1. **`$wb` is null** — `excel_connect!` failed to find or open the
-///    workbook.  Common causes: path-comparison mismatch between
-///    `$w.FullName` and the env-var path (8.3 short names, UNC vs drive
-///    letter), `Workbooks.Open` returning `$null` when `DisplayAlerts`
-///    is off and the file is locked, or `GetActiveObject` connecting to
-///    a different Excel instance that doesn't have the workbook open.
-///    Tag: `VERDE_WB_NULL`.
-///
-/// 2. **`$wb.VBProject` is null** — workbook is open but VBProject is
-///    inaccessible.  Most likely cause: Trust Center setting "Trust
-///    access to the VBA project object model" is disabled. Can also
-///    happen when the VBA project is password-protected.
-///    Tag: `VERDE_TRUST_DENIED`.
-///
-/// PowerShell silently returns `$null` for property access on null
-/// objects (no exception thrown), so without these guards the failure
-/// manifests as a generic "null-valued expression" error at the first
-/// *method call* (`Import`, `Remove`, `Export`), far from the root
-/// cause.  The tags are locale-agnostic so the Rust classifier can
-/// branch on them deterministically.
-#[cfg(windows)]
-macro_rules! vbproject_guard {
-    () => {
-        r#"
-    if (-not $wb) {
-        [Console]::Error.WriteLine("VERDE_WB_NULL")
-        throw "Workbook reference is null after connection attempt. The workbook may not have been found or opened successfully."
-    }
-    if (-not $wb.VBProject) {
-        [Console]::Error.WriteLine("VERDE_TRUST_DENIED")
-        throw "Cannot access VBProject. Enable 'Trust access to the VBA project object model' in Excel Trust Center settings."
-    }
-"#
-    };
-}
+    let saved_alerts = excel.get_bool("DisplayAlerts").unwrap_or(true);
+    excel.put_bool("DisplayAlerts", false)?;
 
-/// Reuse an already-running Excel instance and its open workbook when
-/// possible.  Falls back to `New-Object` → `Workbooks.Open` if no active
-/// Excel process or the target file is not yet open.
-///
-/// **Same-name conflict fallback**: Excel cannot hold two workbooks with
-/// the same filename, even from different directories.  When
-/// `GetActiveObject` finds a running instance that already has a
-/// same-named workbook open at a *different* path, `Workbooks.Open`
-/// returns `$null` (because `DisplayAlerts` is off, the confirmation
-/// dialog is suppressed).  In that case we abandon the existing instance
-/// and create a dedicated one where `Open` will succeed.
-///
-/// Exposes `$ownExcel` / `$ownWb` / `$savedAlerts` so that
-/// `excel_disconnect!` knows what to clean up.
-#[cfg(windows)]
-macro_rules! excel_connect {
-    () => {
-        r#"
-$xlsmFull = [System.IO.Path]::GetFullPath($xlsmPath)
-$ownExcel = $false
-$ownWb = $false
-$savedAlerts = $true
-try {
-    $excel = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
-} catch {
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $ownExcel = $true
-}
-$savedAlerts = $excel.DisplayAlerts
-$excel.DisplayAlerts = $false
-$wb = $null
-foreach ($w in $excel.Workbooks) {
-    try {
-        if ([System.IO.Path]::GetFullPath($w.FullName) -eq $xlsmFull) {
-            $wb = $w
-            break
+    // Step 2: Search open workbooks by full path.
+    let mut wb_found: Option<DispatchObject> = None;
+    let workbooks = excel.get("Workbooks")?;
+    let count = workbooks.count()?;
+    for i in 1..=count {
+        if let Ok(w) = workbooks.item(i) {
+            if let Ok(full_name) = w.get_string("FullName") {
+                // Canonicalize the COM-returned path for comparison.
+                if let Ok(canon) = std::fs::canonicalize(&full_name) {
+                    let canon_str = canon.to_string_lossy();
+                    let canon_str = canon_str.strip_prefix(r"\\?\").unwrap_or(&canon_str);
+                    if canon_str.eq_ignore_ascii_case(xlsm_full_str) {
+                        wb_found = Some(w);
+                        break;
+                    }
+                }
+            }
         }
-    } catch { }
-}
-if (-not $wb) {
-    $wb = $excel.Workbooks.Open($xlsmFull)
-    $ownWb = $true
-}
-if (-not $wb -and -not $ownExcel) {
-    $excel.DisplayAlerts = $savedAlerts
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $ownExcel = $true
-    $savedAlerts = $excel.DisplayAlerts
-    $excel.DisplayAlerts = $false
-    $wb = $excel.Workbooks.Open($xlsmFull)
-    $ownWb = $true
-}
-"#
-    };
-}
-
-/// Restore `DisplayAlerts`, close the workbook only if we opened it,
-/// and quit Excel only if we launched it.
-/// Null-guards `$excel` / `$wb` so the `finally` block never crashes
-/// when `excel_connect` failed before assigning them.
-#[cfg(windows)]
-macro_rules! excel_disconnect {
-    () => {
-        r#"
-    if ($excel) { $excel.DisplayAlerts = $savedAlerts }
-    if ($ownWb -and $wb) { $wb.Close($false) }
-    if ($ownExcel -and $excel) {
-        $excel.Quit()
-        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
     }
-"#
-    };
-}
 
-#[cfg(windows)]
-const EXPORT_SCRIPT: &str = concat!(
-    r#"
-$xlsmPath  = $env:VERDE_XLSM_PATH
-$outputDir = $env:VERDE_OUTPUT_DIR
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $false
-$excel.DisplayAlerts = $false
-try {
-    $wb = $excel.Workbooks.Open($xlsmPath)
-"#,
-    vbproject_guard!(),
-    r#"
-    $modules = @()
-    foreach ($comp in $wb.VBProject.VBComponents) {
-        $ext = switch ($comp.Type) {
-            1 { ".bas" }
-            2 { ".cls" }
-            3 { ".frm" }
-            100 { ".cls" }
-            default { ".bas" }
-        }
-        $filename = $comp.Name + $ext
-        $filepath = Join-Path $outputDir $filename
-        $comp.Export($filepath)
-        $modules += [PSCustomObject]@{ filename = $filename; type = [int]$comp.Type }
-    }
-    $wb.Close($false)
-    $modules | ConvertTo-Json -Compress
-"#,
-    hresult_catch!(),
-    r#"
-} finally {
-    $excel.Quit()
-    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
-}
-"#
-);
-
-#[cfg(windows)]
-const IMPORT_SCRIPT: &str = concat!(
-    r#"
-$xlsmPath   = $env:VERDE_XLSM_PATH
-$moduleName = $env:VERDE_MODULE_NAME
-$modulePath = $env:VERDE_MODULE_PATH
-$ErrorActionPreference = 'Stop'
-try {
-"#,
-    excel_connect!(),
-    vbproject_guard!(),
-    r#"
-    $existing = $wb.VBProject.VBComponents | Where-Object { $_.Name -eq $moduleName }
-    if ($existing -and $existing.Type -ne 100) {
-        $wb.VBProject.VBComponents.Remove($existing)
-    }
-    if ($existing -and $existing.Type -eq 100) {
-        $lines = [System.IO.File]::ReadAllLines($modulePath, [System.Text.Encoding]::UTF8)
-        $codeStart = 0
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match '^Attribute VB_') { $codeStart = $i + 1 }
-        }
-        if ($codeStart -lt $lines.Count) {
-            $code = [string]::Join("`r`n", $lines[$codeStart..($lines.Count - 1)])
-        } else {
-            $code = ''
-        }
-        $existing.CodeModule.DeleteLines(1, $existing.CodeModule.CountOfLines)
-        if ($code.Trim().Length -gt 0) {
-            $existing.CodeModule.AddFromString($code)
-        }
+    // Step 3: Open the workbook if not found.
+    let wb = if let Some(w) = wb_found {
+        w
     } else {
-        $ext = [System.IO.Path]::GetExtension($modulePath)
-        $tempPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'verde_import' + $ext)
-        try {
-            $text = [System.IO.File]::ReadAllText($modulePath, [System.Text.Encoding]::UTF8)
-            [System.IO.File]::WriteAllText($tempPath, $text, [System.Text.Encoding]::Default)
-            $wb.VBProject.VBComponents.Import($tempPath)
-        } finally {
-            Remove-Item $tempPath -ErrorAction SilentlyContinue
-        }
-    }
-    $wb.Save()
-"#,
-    hresult_catch!(),
-    r#"
-} finally {
-"#,
-    excel_disconnect!(),
-    r#"
-}
-"#
-);
-
-/// Batch import: open Excel once, import all modules, save once.
-/// VERDE_MODULES_JSON carries a JSON array of filenames; VERDE_SOURCE_DIR
-/// is the directory containing those files.
-#[cfg(windows)]
-const IMPORT_BATCH_SCRIPT: &str = concat!(
-    r#"
-$xlsmPath  = $env:VERDE_XLSM_PATH
-$sourceDir = $env:VERDE_SOURCE_DIR
-$modules   = $env:VERDE_MODULES_JSON | ConvertFrom-Json
-$ErrorActionPreference = 'Stop'
-try {
-"#,
-    excel_connect!(),
-    vbproject_guard!(),
-    r#"
-    foreach ($filename in $modules) {
-        $moduleName = [System.IO.Path]::GetFileNameWithoutExtension($filename)
-        $modulePath = Join-Path $sourceDir $filename
-        $existing = $wb.VBProject.VBComponents | Where-Object { $_.Name -eq $moduleName }
-        if ($existing -and $existing.Type -ne 100) {
-            $wb.VBProject.VBComponents.Remove($existing)
-        }
-        if ($existing -and $existing.Type -eq 100) {
-            $lines = [System.IO.File]::ReadAllLines($modulePath, [System.Text.Encoding]::UTF8)
-            $codeStart = 0
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-                if ($lines[$i] -match '^Attribute VB_') { $codeStart = $i + 1 }
+        match workbooks.call_get("Open", &mut [variant_bstr(xlsm_full_str)]) {
+            Ok(w) => {
+                own_wb = true;
+                w
             }
-            if ($codeStart -lt $lines.Count) {
-                $code = [string]::Join("`r`n", $lines[$codeStart..($lines.Count - 1)])
+            Err(e) => {
+                // Step 4: Same-name conflict fallback.
+                // Excel cannot hold two workbooks with the same filename
+                // from different directories. When the existing instance
+                // has a same-named workbook, Open fails. Abandon the
+                // existing instance and create a dedicated one.
+                if !own_excel {
+                    excel.put_bool("DisplayAlerts", saved_alerts).ok();
+                    let excel2 = create_instance("Excel.Application")?;
+                    excel2.put_bool("Visible", false)?;
+                    let saved2 = excel2.get_bool("DisplayAlerts").unwrap_or(true);
+                    excel2.put_bool("DisplayAlerts", false)?;
+                    let wbs2 = excel2.get("Workbooks")?;
+                    let wb2 = wbs2.call_get("Open", &mut [variant_bstr(xlsm_full_str)])?;
+                    return Ok(ExcelSession {
+                        excel: excel2,
+                        wb: wb2,
+                        own_excel: true,
+                        own_wb: true,
+                        saved_alerts: saved2,
+                    });
+                }
+                return Err(e);
+            }
+        }
+    };
+
+    Ok(ExcelSession {
+        excel,
+        wb,
+        own_excel,
+        own_wb,
+        saved_alerts,
+    })
+}
+
+/// Restore DisplayAlerts, close the workbook (if owned), quit Excel
+/// (if owned). Best-effort: errors during cleanup are swallowed.
+#[cfg(windows)]
+fn excel_disconnect(session: ExcelSession) {
+    session
+        .excel
+        .put_bool("DisplayAlerts", session.saved_alerts)
+        .ok();
+    if session.own_wb {
+        session
+            .wb
+            .call_void("Close", &mut [false.into()])
+            .ok();
+    }
+    if session.own_excel {
+        session.excel.call_void("Quit", &mut []).ok();
+    }
+}
+
+/// Check that the workbook and its VBProject are accessible.
+/// Returns the VBProject dispatch object on success.
+#[cfg(windows)]
+fn vbproject_guard(wb: &DispatchObject) -> Result<DispatchObject, VbaBridgeError> {
+    // The workbook itself was already obtained, but double-check it's
+    // not a dead reference.
+    if wb.is_null_or_empty("Name") {
+        return Err(VbaBridgeError::WorkbookNull);
+    }
+    match wb.get("VBProject") {
+        Ok(vbp) => {
+            // Verify the VBProject is actually accessible by reading a
+            // property. If Trust Center blocks access, this will fail.
+            if vbp.is_null_or_empty("Name") {
+                Err(VbaBridgeError::TrustDenied)
             } else {
-                $code = ''
-            }
-            $existing.CodeModule.DeleteLines(1, $existing.CodeModule.CountOfLines)
-            if ($code.Trim().Length -gt 0) {
-                $existing.CodeModule.AddFromString($code)
-            }
-        } else {
-            $ext = [System.IO.Path]::GetExtension($modulePath)
-            $tempPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'verde_import_' + $moduleName + $ext)
-            try {
-                $text = [System.IO.File]::ReadAllText($modulePath, [System.Text.Encoding]::UTF8)
-                [System.IO.File]::WriteAllText($tempPath, $text, [System.Text.Encoding]::Default)
-                $wb.VBProject.VBComponents.Import($tempPath)
-            } finally {
-                Remove-Item $tempPath -ErrorAction SilentlyContinue
+                Ok(vbp)
             }
         }
+        Err(_) => Err(VbaBridgeError::TrustDenied),
     }
-    $wb.Save()
-"#,
-    hresult_catch!(),
-    r#"
-} finally {
-"#,
-    excel_disconnect!(),
-    r#"
 }
-"#
-);
 
-/// Default timeout for PowerShell COM operations. COM calls to Excel
-/// can be slow (large workbooks, network paths, plugin initialization)
-/// but anything beyond 60 seconds indicates a likely hang.
+/// Map VBComponent.Type to file extension.
 #[cfg(windows)]
-const PS_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Run a pre-configured `Command` with a timeout. Spawns the child
-/// process and waits on a background thread; if the deadline expires,
-/// the process tree is killed via `taskkill /T`.
-#[cfg(windows)]
-fn run_with_timeout(
-    cmd: &mut Command,
-    timeout: Duration,
-) -> Result<std::process::Output, Box<dyn std::error::Error>> {
-    use std::sync::mpsc;
-
-    let child = cmd.spawn()?;
-    let child_id = child.id();
-    let (tx, rx) = mpsc::channel();
-
-    std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
-    });
-
-    match rx.recv_timeout(timeout) {
-        Ok(result) => Ok(result?),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            // Kill the entire process tree (PowerShell + any COM child).
-            let _ = Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &child_id.to_string()])
-                .output();
-            Err(format!(
-                "PowerShell operation timed out after {} seconds",
-                timeout.as_secs()
-            )
-            .into())
-        }
-        Err(e) => Err(format!("Failed to wait for PowerShell process: {e}").into()),
+fn ext_for_type(type_code: i32) -> &'static str {
+    match type_code {
+        1 => ".bas",
+        2 => ".cls",
+        3 => ".frm",
+        100 => ".cls",
+        _ => ".bas",
     }
+}
+
+/// Find a VBComponent by name in the VBComponents collection.
+/// Returns `Ok(None)` if not found.
+#[cfg(windows)]
+fn find_component_by_name(
+    components: &DispatchObject,
+    module_name: &str,
+) -> Result<Option<DispatchObject>, VbaBridgeError> {
+    let count = components.count()?;
+    for i in 1..=count {
+        let comp = components.item(i)?;
+        if let Ok(name) = comp.get_string("Name") {
+            if name.eq_ignore_ascii_case(module_name) {
+                return Ok(Some(comp));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Import a single module into the workbook via COM.
+/// Handles the document module (type=100) special case.
+#[cfg(windows)]
+fn import_module_com(
+    components: &DispatchObject,
+    module_name: &str,
+    module_path: &Path,
+) -> Result<(), VbaBridgeError> {
+    let existing = find_component_by_name(components, module_name)?;
+
+    if let Some(ref comp) = existing {
+        let type_code = comp.get_i32("Type").unwrap_or(0);
+        if type_code == 100 {
+            // Document module: cannot remove/reimport. Patch the
+            // CodeModule in place — same logic as the old PS bridge.
+            let content = std::fs::read_to_string(module_path)
+                .map_err(|e| VbaBridgeError::Other(format!("Failed to read module file: {e}")))?;
+
+            // Strip Attribute VB_ headers.
+            let mut code_start = 0;
+            for (i, line) in content.lines().enumerate() {
+                if line.starts_with("Attribute VB_") {
+                    code_start = i + 1;
+                }
+            }
+            let code_lines: Vec<&str> = content.lines().collect();
+            let code = if code_start < code_lines.len() {
+                code_lines[code_start..].join("\r\n")
+            } else {
+                String::new()
+            };
+
+            let code_module = comp.get("CodeModule")?;
+            let line_count = code_module.get_i32("CountOfLines").unwrap_or(0);
+            if line_count > 0 {
+                code_module.call_void(
+                    "DeleteLines",
+                    &mut [1i32.into(), line_count.into()],
+                )?;
+            }
+            if !code.trim().is_empty() {
+                code_module.call_void("AddFromString", &mut [variant_bstr(&code)])?;
+            }
+            return Ok(());
+        }
+    }
+
+    // Non-document module: remove existing, import fresh.
+    if let Some(comp) = existing {
+        components.call_void("Remove", &mut [comp.into_variant()])?;
+    }
+
+    // Write a temp file encoded in the system's ANSI code page
+    // (e.g. CP932 on Japanese Windows) — Excel's VBComponents.Import
+    // expects this encoding.
+    let ext = module_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bas");
+    let temp_dir = std::env::temp_dir();
+    let temp_path = temp_dir.join(format!("verde_import_{module_name}.{ext}"));
+
+    let source_text = std::fs::read_to_string(module_path)
+        .map_err(|e| VbaBridgeError::Other(format!("Failed to read module file: {e}")))?;
+    let encoding = system_encoding();
+    let (encoded, _, _) = encoding.encode(&source_text);
+    std::fs::write(&temp_path, &*encoded)
+        .map_err(|e| VbaBridgeError::Other(format!("Failed to write temp file: {e}")))?;
+
+    let import_result =
+        components.call_void("Import", &mut [variant_bstr(&temp_path.to_string_lossy())]);
+
+    // Clean up temp file regardless of import result.
+    let _ = std::fs::remove_file(&temp_path);
+
+    import_result
 }
 
 pub struct VbaBridge;
 
 impl VbaBridge {
-    /// PowerShell COM 経由で VBA コードをエクスポート
+    /// Export all VBA modules from a workbook to disk via COM.
     #[cfg(windows)]
     pub async fn export(
         xlsm_path: &str,
         output_dir: &str,
     ) -> Result<Vec<ExportedModule>, Box<dyn std::error::Error>> {
-        let output = run_with_timeout(
-            Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    EXPORT_SCRIPT,
-                ])
-                .env("VERDE_XLSM_PATH", xlsm_path)
-                .env("VERDE_OUTPUT_DIR", output_dir),
-            PS_TIMEOUT,
-        )?;
+        let xlsm = xlsm_path.to_owned();
+        let out_dir = output_dir.to_owned();
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("PowerShell export failed: {}", stderr).into());
-        }
+        let modules = run_on_sta_thread(COM_TIMEOUT, move || {
+            let excel = create_instance("Excel.Application")?;
+            excel.put_bool("Visible", false)?;
+            excel.put_bool("DisplayAlerts", false)?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let modules: Vec<ExportedModule> = serde_json::from_str(&stdout)?;
+            let workbooks = excel.get("Workbooks")?;
+            let wb = workbooks.call_get("Open", &mut [variant_bstr(&xlsm)])?;
+
+            let vbproject = vbproject_guard(&wb)?;
+            let components = vbproject.get("VBComponents")?;
+            let count = components.count()?;
+
+            let mut modules = Vec::new();
+            for i in 1..=count {
+                let comp = components.item(i)?;
+                let name = comp.get_string("Name")?;
+                let type_code = comp.get_i32("Type")?;
+                let ext = ext_for_type(type_code);
+                let filename = format!("{name}{ext}");
+                let filepath = Path::new(&out_dir).join(&filename);
+
+                comp.call_void(
+                    "Export",
+                    &mut [variant_bstr(&filepath.to_string_lossy())],
+                )?;
+
+                modules.push(ExportedModule {
+                    filename,
+                    module_type: type_code as u32,
+                });
+            }
+
+            wb.call_void("Close", &mut [false.into()])?;
+            excel.call_void("Quit", &mut [])?;
+
+            Ok(modules)
+        })?;
+
         Ok(modules)
     }
 
-    /// PowerShell COM 経由で VBA コードをインポート
+    /// Import a single VBA module into a workbook via COM.
     #[cfg(windows)]
     pub async fn import(
         xlsm_path: &str,
         source_dir: &str,
         module_filename: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let module_path = Path::new(source_dir).join(module_filename);
+        let xlsm = xlsm_path.to_owned();
+        let module_path = Path::new(source_dir).join(module_filename).to_owned();
         let module_name = Path::new(module_filename)
             .file_stem()
             .unwrap_or_default()
-            .to_string_lossy();
-        let module_path_str = module_path.to_string_lossy();
+            .to_string_lossy()
+            .to_string();
 
-        let output = run_with_timeout(
-            Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    IMPORT_SCRIPT,
-                ])
-                .env("VERDE_XLSM_PATH", xlsm_path)
-                .env("VERDE_MODULE_NAME", module_name.as_ref())
-                .env("VERDE_MODULE_PATH", module_path_str.as_ref()),
-            PS_TIMEOUT,
-        )?;
+        run_on_sta_thread(COM_TIMEOUT, move || {
+            let session = excel_connect(&xlsm)?;
+            let vbproject = vbproject_guard(&session.wb)?;
+            let components = vbproject.get("VBComponents")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("PowerShell import failed: {}", stderr).into());
-        }
+            let result = import_module_com(&components, &module_name, &module_path);
+
+            if result.is_ok() {
+                session.wb.call_void("Save", &mut []).ok();
+            }
+
+            excel_disconnect(session);
+            result
+        })?;
 
         Ok(())
     }
 
-    /// Batch-import multiple modules in a single PowerShell/Excel session.
-    /// Opens the workbook once, imports all modules, saves once, closes once.
+    /// Batch-import multiple modules in a single COM session.
+    /// Opens the workbook once, imports all modules, saves once.
     #[cfg(windows)]
     pub async fn import_batch(
         xlsm_path: &str,
@@ -452,27 +389,30 @@ impl VbaBridge {
             return Ok(());
         }
 
-        let modules_json = serde_json::to_string(module_filenames)?;
+        let xlsm = xlsm_path.to_owned();
+        let src_dir = source_dir.to_owned();
+        let filenames: Vec<String> = module_filenames.iter().map(|s| s.to_string()).collect();
 
-        let output = run_with_timeout(
-            Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    IMPORT_BATCH_SCRIPT,
-                ])
-                .env("VERDE_XLSM_PATH", xlsm_path)
-                .env("VERDE_SOURCE_DIR", source_dir)
-                .env("VERDE_MODULES_JSON", &modules_json),
-            PS_TIMEOUT,
-        )?;
+        run_on_sta_thread(COM_TIMEOUT, move || {
+            let session = excel_connect(&xlsm)?;
+            let vbproject = vbproject_guard(&session.wb)?;
+            let components = vbproject.get("VBComponents")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("PowerShell batch import failed: {}", stderr).into());
-        }
+            for filename in &filenames {
+                let module_name = Path::new(filename)
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let module_path = Path::new(&src_dir).join(filename);
+
+                import_module_com(&components, &module_name, &module_path)?;
+            }
+
+            session.wb.call_void("Save", &mut []).ok();
+            excel_disconnect(session);
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -568,9 +508,9 @@ mod tests {
 
     // --- Sprint 23 / PBI #15: env-var passing contract ---
     //
-    // Caller data rides `$env:VERDE_*` instead of the PS script body, so
-    // there is no PS-sensitive surface to mitigate. Injection-flavored
-    // input reaches the platform-not-supported branch unchanged.
+    // Injection-flavored input now reaches the platform-not-supported
+    // branch unchanged. With direct COM calls, there is even less
+    // surface than the old env-var approach.
 
     #[cfg(not(target_os = "windows"))]
     #[test]
@@ -583,7 +523,7 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.contains("VBA bridge requires Windows"),
-            "env-var path must expose no PS-sensitive surface to mitigate, got: {msg}"
+            "direct COM path has no injection surface, got: {msg}"
         );
         assert!(
             !msg.contains("PowerShell-sensitive"),
@@ -630,7 +570,7 @@ mod tests {
         let msg = err.to_string();
         assert!(
             msg.contains("VBA bridge requires Windows"),
-            "env-var path must expose no PS-sensitive surface to mitigate, got: {msg}"
+            "direct COM path has no injection surface, got: {msg}"
         );
         assert!(
             !msg.contains("PowerShell-sensitive"),
