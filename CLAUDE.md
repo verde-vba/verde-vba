@@ -7,7 +7,7 @@ Replaces VBE for editing VBA macros in .xlsm files.
 
 ## Tech Stack
 
-- **Backend**: Rust (Tauri v2), PowerShell COM for Excel integration
+- **Backend**: Rust (Tauri v2), windows-rs COM for Excel integration
 - **Frontend**: Vite + React + TypeScript, Monaco Editor
 - **MCP Server**: Node.js + @modelcontextprotocol/sdk
 - **Dev Environment**: mise (cross-platform) or Nix flake
@@ -30,7 +30,8 @@ just serve "C:\file.xlsm"  # Start MCP server
 - `src-tauri/src/commands.rs` — Tauri IPC command handlers
 - `src-tauri/src/project.rs` — Project directory management (AppData)
 - `src-tauri/src/lock.rs` — Lock file management
-- `src-tauri/src/vba_bridge.rs` — PowerShell COM export/import
+- `src-tauri/src/com_dispatch.rs` — IDispatch late-binding wrapper for COM automation
+- `src-tauri/src/vba_bridge.rs` — Excel COM export/import via windows-rs
 - `src-tauri/src/settings.rs` — User settings persistence
 - `src/components/Editor.tsx` — Monaco Editor wrapper with VBA support
 - `src/hooks/useTheme.ts` — Theme management (system/light/dark)
@@ -42,5 +43,5 @@ just serve "C:\file.xlsm"  # Start MCP server
 - 1 xlsm = 1 process (independent Tauri instances)
 - VBA source stored in %APPDATA%/verde/projects/<sha256-hash>/
 - Project ID: SHA256 of xlsm absolute path (first 16 chars)
-- COM integration via PowerShell (MVP), future: windows-rs
+- COM integration via windows-rs (IDispatch late-binding on STA thread)
 - Lock files: ~$<filename>.xlsm in same directory as xlsm
