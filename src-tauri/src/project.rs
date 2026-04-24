@@ -5,6 +5,13 @@ use std::path::{Path, PathBuf};
 
 use crate::conflict::{detect_conflicts, ConflictContentDto, ConflictModule};
 
+mod com_errors;
+
+// Re-export so external references to `project::EXCEL_OPEN_MARKER` keep
+// working after the classifier moved into a submodule.
+#[allow(unused_imports)]
+pub use com_errors::{EXCEL_OPEN_MARKER, TRUST_ACCESS_MARKER};
+
 /// Decode bytes exported by Excel COM into a UTF-8 String.
 ///
 /// Fast path: if the bytes are valid UTF-8, return them as-is (zero-copy
@@ -68,53 +75,8 @@ fn vba_body_offset(source: &str) -> usize {
     pos
 }
 
-use crate::com_dispatch::VbaBridgeError;
 use crate::settings::Settings;
 use crate::vba_bridge::VbaBridge;
-
-/// Locale-agnostic classification of a COM HRESULT.
-///
-/// With the windows-rs COM bridge, HRESULT values are available directly
-/// from `VbaBridgeError::Com(hr)` — no string parsing needed.
-///
-/// The variants intentionally cover only the kinds Verde currently branches
-/// on. Anything unrecognised goes into `Unknown(i32)` so diagnostics can
-/// still surface the raw value without pretending to classify it.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ErrorKind {
-    ExcelOpen,
-    // `#[allow(dead_code)]` is temporary — PermissionDenied / NotFound /
-    // Unknown are exercised by pure classify_hresult tests but not yet
-    // branched on in production code. They'll come off the allowlist once
-    // the UI grows branches for them (planned follow-up, not Sprint 25).
-    #[allow(dead_code)]
-    PermissionDenied,
-    #[allow(dead_code)]
-    NotFound,
-    #[allow(dead_code)]
-    Unknown(i32),
-}
-
-/// HRESULT values that all indicate "another process (Excel) holds the
-/// file open". Grouped here rather than inline in `classify_hresult` so
-/// a future locale- or API-driven addition (e.g. an OLE-specific variant)
-/// has a single, greppable home.
-///
-/// - `0x80070020` `ERROR_SHARING_VIOLATION` — file shared for delete/write
-/// - `0x80070021` `ERROR_LOCK_VIOLATION` — byte-range lock conflict
-pub(crate) const EXCEL_OPEN_HRESULTS: &[i32] =
-    &[0x80070020u32 as i32, 0x80070021u32 as i32];
-
-/// Marker embedded in error messages when Excel is holding the workbook open
-/// (file locked, COM cannot save). The frontend can match on this prefix to
-/// surface a "close Excel first" dialog (PLANS §9 step 4).
-pub const EXCEL_OPEN_MARKER: &str = "EXCEL_OPEN";
-
-/// Marker embedded in error messages when `$wb.VBProject` is inaccessible
-/// because the Excel Trust Center setting "Trust access to the VBA project
-/// object model" is disabled. The frontend matches on this prefix to
-/// re-surface the TrustGuideDialog.
-pub const TRUST_ACCESS_MARKER: &str = "TRUST_ACCESS";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModuleInfo {
@@ -152,6 +114,32 @@ fn sorted_modules(modules: HashMap<String, ModuleInfo>) -> Vec<ModuleInfo> {
             .then(a.filename.cmp(&b.filename))
     });
     list
+}
+
+/// RAII guard for a temp directory that Excel exports are written to.
+/// Removes the directory on drop — even when the surrounding function
+/// panics or returns early via `?` — so conflict-resolution paths don't
+/// have to interleave cleanup with error handling.
+struct TempExportDir {
+    path: PathBuf,
+}
+
+impl TempExportDir {
+    fn new(tag: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            path: ProjectManager::make_temp_dir(tag)?,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempExportDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 pub struct ProjectManager;
@@ -269,7 +257,7 @@ impl ProjectManager {
         // no explanation when their VBA modules don't appear.
         Self::export_and_init(&project_id, xlsm_path, &project_dir)
             .await
-            .map_err(Self::classify_com_error)
+            .map_err(com_errors::classify_com_error)
     }
 
     /// SHA256 of a module's source content, matching the `hash` field in
@@ -299,61 +287,6 @@ impl ProjectManager {
             m.line_count = line_count;
         });
         Self::write_meta(project_id, &meta)
-    }
-
-    /// Map a HRESULT integer to Verde's classification enum.
-    ///
-    /// Pure function — no locale, no I/O. Used by `classify_com_error`
-    /// to branch on the HRESULT carried by `VbaBridgeError::Com(hr)`.
-    pub(crate) fn classify_hresult(hresult: i32) -> ErrorKind {
-        if EXCEL_OPEN_HRESULTS.contains(&hresult) {
-            ErrorKind::ExcelOpen
-        } else if hresult == 0x80070005u32 as i32 {
-            ErrorKind::PermissionDenied
-        } else if hresult == 0x80030002u32 as i32 {
-            ErrorKind::NotFound
-        } else {
-            ErrorKind::Unknown(hresult)
-        }
-    }
-
-    /// Classify an import/export failure using structural error types.
-    ///
-    /// With the windows-rs COM bridge, errors carry their classification
-    /// directly as `VbaBridgeError` variants — no string parsing needed.
-    /// The most specific markers are checked first (workbook-null,
-    /// trust-denied), then HRESULT-based Excel-open detection.
-    /// Non-matching errors pass through unchanged.
-    fn classify_com_error(err: Box<dyn std::error::Error>) -> Box<dyn std::error::Error> {
-        if let Some(bridge_err) = err.downcast_ref::<VbaBridgeError>() {
-            match bridge_err {
-                VbaBridgeError::WorkbookNull => {
-                    return format!(
-                        "{}: Workbook could not be opened. Excel may have the file locked or the path could not be resolved.",
-                        EXCEL_OPEN_MARKER
-                    )
-                    .into();
-                }
-                VbaBridgeError::TrustDenied => {
-                    return format!(
-                        "{}: VBProject is not accessible. Enable 'Trust access to the VBA project object model' in Excel settings.",
-                        TRUST_ACCESS_MARKER
-                    )
-                    .into();
-                }
-                VbaBridgeError::Com(hr)
-                    if Self::classify_hresult(*hr) == ErrorKind::ExcelOpen =>
-                {
-                    return format!(
-                        "{}: Excel appears to have the workbook open. Close it and retry. (HRESULT 0x{:08X})",
-                        EXCEL_OPEN_MARKER, hr
-                    )
-                    .into();
-                }
-                _ => {}
-            }
-        }
-        err
     }
 
     pub async fn save_module(
@@ -413,7 +346,7 @@ impl ProjectManager {
             if let Some(xlsm_path) = xlsm_path {
                 let source_dir = project_dir.to_string_lossy().to_string();
                 if let Err(e) = VbaBridge::import(&xlsm_path, &source_dir, filename).await {
-                    return Err(Self::classify_com_error(e));
+                    return Err(com_errors::classify_com_error(e));
                 }
                 // Only update the stored hash after Excel has accepted the
                 // import — otherwise a later conflict check would think the
@@ -473,7 +406,7 @@ impl ProjectManager {
         let refs: Vec<&str> = module_files.iter().map(|s| s.as_str()).collect();
         VbaBridge::import_batch(&xlsm_path, &source_dir, &refs)
             .await
-            .map_err(Self::classify_com_error)?;
+            .map_err(com_errors::classify_com_error)?;
 
         // Refresh meta hashes after the batch import succeeds so a
         // subsequent conflict check sees the workbook as in sync.
@@ -564,17 +497,38 @@ impl ProjectManager {
         Ok(out)
     }
 
-    /// RAII wrapper that removes a temp directory on drop, even if the
-    /// containing function panics or returns early. We avoid pulling in the
-    /// `tempfile` crate just for this one call site.
+    /// Create a fresh temp directory keyed by `tag`, clearing any leftover
+    /// from a previous crashed run. Cleanup is the caller's responsibility;
+    /// prefer [`TempExportDir::new`] which handles removal via `Drop`.
     fn make_temp_dir(tag: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let base =
             std::env::temp_dir().join(format!("verde_conflict_{}_{}", tag, std::process::id()));
-        // Clear any leftover from a previous crashed run so the new export
-        // starts from a clean slate.
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base)?;
         Ok(base)
+    }
+
+    /// Push every module named in `module_names` from AppData into the live
+    /// Excel workbook and refresh the stored hashes so a subsequent conflict
+    /// check is clean. Shared by the "verde wins" paths of `resolve_conflict`
+    /// and `resolve_conflict_per_module`.
+    async fn apply_verde_side(
+        project_id: &str,
+        project_dir: &Path,
+        xlsm_path: &str,
+        module_names: &[&str],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let source_dir = project_dir.to_string_lossy().to_string();
+        VbaBridge::import_batch(xlsm_path, &source_dir, module_names)
+            .await
+            .map_err(com_errors::classify_com_error)?;
+
+        for name in module_names {
+            let bytes = std::fs::read(project_dir.join(name))?;
+            let content = decode_vba_bytes(&bytes);
+            Self::update_module_hash(project_id, name, &content)?;
+        }
+        Ok(())
     }
 
     /// Three-way conflict detection (PLANS §254-257). Compares the hashes
@@ -601,17 +555,9 @@ impl ProjectManager {
             HashMap::new()
         };
 
-        let temp_dir = Self::make_temp_dir(project_id)?;
-        let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
-        let excel_hashes = match export_result {
-            Ok(_) => Self::hash_files_in_dir(&temp_dir)?,
-            Err(e) => {
-                // Always best-effort cleanup before propagating.
-                let _ = std::fs::remove_dir_all(&temp_dir);
-                return Err(e);
-            }
-        };
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = TempExportDir::new(project_id)?;
+        VbaBridge::export(xlsm_path, &temp.path().to_string_lossy()).await?;
+        let excel_hashes = Self::hash_files_in_dir(temp.path())?;
 
         Ok(detect_conflicts(&file_hashes, &meta_hashes, &excel_hashes))
     }
@@ -637,7 +583,6 @@ impl ProjectManager {
                 if !project_dir.exists() {
                     return Err("Project directory not found".into());
                 }
-                let source_dir = project_dir.to_string_lossy().to_string();
                 let mut module_files: Vec<String> = Vec::new();
                 for entry in std::fs::read_dir(&project_dir)? {
                     let entry = entry?;
@@ -652,16 +597,7 @@ impl ProjectManager {
                 }
 
                 let refs: Vec<&str> = module_files.iter().map(|s| s.as_str()).collect();
-                VbaBridge::import_batch(xlsm_path, &source_dir, &refs)
-                    .await
-                    .map_err(Self::classify_com_error)?;
-
-                for name in &module_files {
-                    let bytes = std::fs::read(project_dir.join(name))?;
-                    let content = decode_vba_bytes(&bytes);
-                    Self::update_module_hash(project_id, name, &content)?;
-                }
-                Ok(())
+                Self::apply_verde_side(project_id, &project_dir, xlsm_path, &refs).await
             }
             "excel" => {
                 // Freshly export Excel -> AppData, clobbering local edits,
@@ -696,12 +632,8 @@ impl ProjectManager {
 
         // Export Excel modules to a temp directory once — reading a single
         // COM export is far cheaper than N individual calls.
-        let temp_dir = Self::make_temp_dir(project_id)?;
-        let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
-        if let Err(e) = export_result {
-            let _ = std::fs::remove_dir_all(&temp_dir);
-            return Err(e);
-        }
+        let temp = TempExportDir::new(project_id)?;
+        VbaBridge::export(xlsm_path, &temp.path().to_string_lossy()).await?;
 
         let mut contents = Vec::with_capacity(filenames.len());
         for filename in filenames {
@@ -713,7 +645,7 @@ impl ProjectManager {
                 String::new()
             };
 
-            let excel_path = temp_dir.join(filename);
+            let excel_path = temp.path().join(filename);
             let excel_content = if excel_path.exists() {
                 let bytes = std::fs::read(&excel_path)?;
                 decode_vba_bytes(&bytes)
@@ -728,7 +660,6 @@ impl ProjectManager {
             });
         }
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
         Ok(contents)
     }
 
@@ -766,40 +697,22 @@ impl ProjectManager {
         // Do this BEFORE importing "verde" modules so we capture the
         // pre-resolution Excel state.
         if !excel_modules.is_empty() {
-            let temp_dir = Self::make_temp_dir(project_id)?;
-            let export_result = VbaBridge::export(xlsm_path, &temp_dir.to_string_lossy()).await;
-            match export_result {
-                Ok(_) => {
-                    for filename in &excel_modules {
-                        let src = temp_dir.join(filename);
-                        if src.exists() {
-                            let bytes = std::fs::read(&src)?;
-                            let content = decode_vba_bytes(&bytes);
-                            std::fs::write(project_dir.join(filename), content.as_bytes())?;
-                            Self::update_module_hash(project_id, filename, &content)?;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = std::fs::remove_dir_all(&temp_dir);
-                    return Err(e);
+            let temp = TempExportDir::new(project_id)?;
+            VbaBridge::export(xlsm_path, &temp.path().to_string_lossy()).await?;
+            for filename in &excel_modules {
+                let src = temp.path().join(filename);
+                if src.exists() {
+                    let bytes = std::fs::read(&src)?;
+                    let content = decode_vba_bytes(&bytes);
+                    std::fs::write(project_dir.join(filename), content.as_bytes())?;
+                    Self::update_module_hash(project_id, filename, &content)?;
                 }
             }
-            let _ = std::fs::remove_dir_all(&temp_dir);
         }
 
         // Step 2: Batch-import "verde" modules into Excel.
         if !verde_modules.is_empty() {
-            let source_dir = project_dir.to_string_lossy().to_string();
-            VbaBridge::import_batch(xlsm_path, &source_dir, &verde_modules)
-                .await
-                .map_err(Self::classify_com_error)?;
-
-            for filename in &verde_modules {
-                let bytes = std::fs::read(project_dir.join(filename))?;
-                let content = decode_vba_bytes(&bytes);
-                Self::update_module_hash(project_id, filename, &content)?;
-            }
+            Self::apply_verde_side(project_id, &project_dir, xlsm_path, &verde_modules).await?;
         }
 
         Ok(())
@@ -856,97 +769,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&missing);
         let got = ProjectManager::hash_files_in_dir(&missing).unwrap();
         assert!(got.is_empty());
-    }
-
-    // --- classify_hresult (pure) ---
-
-    #[test]
-    fn classify_hresult_maps_sharing_violation_to_excel_open() {
-        // ERROR_SHARING_VIOLATION — canonical "another process has the file
-        // open for delete/write", which is exactly the Excel case.
-        let kind = ProjectManager::classify_hresult(0x80070020u32 as i32);
-        assert_eq!(kind, ErrorKind::ExcelOpen);
-    }
-
-    #[test]
-    fn classify_hresult_maps_lock_violation_to_excel_open() {
-        // ERROR_LOCK_VIOLATION — secondary Excel-holding-file signal. Pinned
-        // so a future refactor cannot accidentally drop it without tripping
-        // this test.
-        let kind = ProjectManager::classify_hresult(0x80070021u32 as i32);
-        assert_eq!(kind, ErrorKind::ExcelOpen);
-    }
-
-    #[test]
-    fn classify_hresult_maps_access_denied_to_permission_denied() {
-        // E_ACCESSDENIED — not Excel; a permissions problem. Classifying it
-        // separately means the UI can route it to a different dialog later.
-        let kind = ProjectManager::classify_hresult(0x80070005u32 as i32);
-        assert_eq!(kind, ErrorKind::PermissionDenied);
-    }
-
-    #[test]
-    fn classify_hresult_leaves_unrecognised_codes_in_unknown_bucket() {
-        // XlNamedRange (Excel-specific) — not one we branch on. Must fall
-        // through to Unknown with the raw i32 preserved for diagnostics.
-        let raw = 0x800A03ECu32 as i32;
-        assert_eq!(ProjectManager::classify_hresult(raw), ErrorKind::Unknown(raw));
-    }
-
-    // --- classify_com_error with VbaBridgeError ---
-
-    #[test]
-    fn classify_com_error_maps_workbook_null_to_excel_open_marker() {
-        let err: Box<dyn std::error::Error> = VbaBridgeError::WorkbookNull.into();
-        let classified = ProjectManager::classify_com_error(err);
-        let msg = classified.to_string();
-        assert!(
-            msg.starts_with(EXCEL_OPEN_MARKER),
-            "WorkbookNull should map to EXCEL_OPEN marker, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn classify_com_error_maps_trust_denied_to_trust_access_marker() {
-        let err: Box<dyn std::error::Error> = VbaBridgeError::TrustDenied.into();
-        let classified = ProjectManager::classify_com_error(err);
-        let msg = classified.to_string();
-        assert!(
-            msg.starts_with(TRUST_ACCESS_MARKER),
-            "TrustDenied should map to TRUST_ACCESS marker, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn classify_com_error_maps_sharing_violation_hresult_to_excel_open_marker() {
-        let err: Box<dyn std::error::Error> =
-            VbaBridgeError::Com(0x80070020u32 as i32).into();
-        let classified = ProjectManager::classify_com_error(err);
-        let msg = classified.to_string();
-        assert!(
-            msg.starts_with(EXCEL_OPEN_MARKER),
-            "HRESULT 0x80070020 should map to EXCEL_OPEN marker, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn classify_com_error_passes_through_unrecognised_hresult() {
-        let hr = 0x800A03ECu32 as i32;
-        let err: Box<dyn std::error::Error> = VbaBridgeError::Com(hr).into();
-        let classified = ProjectManager::classify_com_error(err);
-        let msg = classified.to_string();
-        assert!(
-            !msg.starts_with(EXCEL_OPEN_MARKER) && !msg.starts_with(TRUST_ACCESS_MARKER),
-            "Unrecognised HRESULT should pass through unchanged, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn classify_com_error_passes_through_non_bridge_errors() {
-        let err: Box<dyn std::error::Error> = "some other error".into();
-        let classified = ProjectManager::classify_com_error(err);
-        let msg = classified.to_string();
-        assert_eq!(msg, "some other error");
     }
 
     #[test]
